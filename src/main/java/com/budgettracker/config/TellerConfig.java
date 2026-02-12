@@ -13,6 +13,10 @@ import org.springframework.util.StringUtils;
 
 import javax.net.ssl.SSLContext;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
 
 @Configuration
 @ConfigurationProperties(prefix = "teller")
@@ -26,23 +30,43 @@ public class TellerConfig {
     @Data
     public static class Mtls {
         private String keystorePath;
+        private String keystoreBase64;   // ← new: set via TELLER_KEYSTORE_BASE64 on Railway
         private String keystorePassword;
         private String keyPassword;
     }
 
+    /**
+     * Resolves the keystore file path:
+     * 1. If keystoreBase64 is set (Railway/production): decode to a temp file
+     * 2. Otherwise fall back to keystorePath (local dev)
+     */
+    private String resolveKeystorePath() throws IOException {
+        if (StringUtils.hasText(mtls.keystoreBase64)) {
+            byte[] decoded = Base64.getDecoder().decode(mtls.keystoreBase64.trim());
+            Path tempFile = Files.createTempFile("teller-keystore-", ".p12");
+            Files.write(tempFile, decoded);
+            tempFile.toFile().deleteOnExit();
+            return tempFile.toAbsolutePath().toString();
+        }
+        return mtls.keystorePath;
+    }
+
     @Bean(name = "tellerRestTemplate")
-    public RestTemplate tellerRestTemplate() {
-        // If not configured, create a normal RestTemplate so the app/tests can boot.
-        if (!StringUtils.hasText(mtls.keystorePath) || !StringUtils.hasText(mtls.keystorePassword)) {
+    public RestTemplate tellerRestTemplate() throws IOException {
+        String resolvedPath = resolveKeystorePath();
+
+        // If neither Base64 nor path is configured, boot normally (tests / first run)
+        if (!StringUtils.hasText(resolvedPath) || !StringUtils.hasText(mtls.keystorePassword)) {
             return new RestTemplate();
         }
 
         try {
-            char[] keyPass = (mtls.keyPassword != null ? mtls.keyPassword : mtls.keystorePassword).toCharArray();
+            char[] keyPass = (mtls.keyPassword != null ? mtls.keyPassword : mtls.keystorePassword)
+                    .toCharArray();
 
             SSLContext sslContext = SSLContextBuilder.create()
                     .loadKeyMaterial(
-                            new File(mtls.keystorePath),
+                            new File(resolvedPath),
                             mtls.keystorePassword.toCharArray(),
                             keyPass
                     )
