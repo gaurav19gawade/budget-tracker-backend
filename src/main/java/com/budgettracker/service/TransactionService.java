@@ -159,7 +159,7 @@ public class TransactionService {
                 .categoryName(transaction.getCategory() != null ? transaction.getCategory().getName() : null)
                 .isManual(transaction.getIsManual())
                 .pending(transaction.getPending())
-                .plaidTransactionId(transaction.getPlaidTransactionId())
+                .tellerTransactionId(transaction.getTellerTransactionId())
                 .createdAt(transaction.getCreatedAt())
                 .build();
     }

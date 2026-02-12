@@ -7,12 +7,12 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "plaid_items")
+@Table(name = "teller_enrollments")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PlaidItem {
+public class TellerEnrollment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,11 +22,19 @@ public class PlaidItem {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    /**
+     * Teller enrollment id (enr_xxx) returned by Teller Connect.
+     * Enrollment is Teller’s equivalent of a user login at an FI. :contentReference[oaicite:5]{index=5}
+     */
     @Column(unique = true, nullable = false)
-    private String plaidItemId;
+    private String enrollmentId;
 
-    @Column(nullable = false)
-    private String plaidAccessToken;
+    /**
+     * Teller access token returned by Teller Connect.
+     * Stored encrypted-at-rest in a real system (KMS/Vault), but kept as-is here for your project.
+     */
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String accessToken;
 
     private String institutionName;
 

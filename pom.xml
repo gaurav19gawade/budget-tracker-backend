@@ -16,11 +16,10 @@
 	<artifactId>budget-tracker-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>Budget Tracker Backend</name>
-	<description>Budget tracking application with Plaid integration</description>
+	<description>Budget tracking application with Teller integration</description>
 
 	<properties>
 		<java.version>17</java.version>
-		<plaid.version>18.0.0</plaid.version>
 	</properties>
 
 	<dependencies>
@@ -52,12 +51,13 @@
 			<scope>runtime</scope>
 		</dependency>
 
-		<!-- Plaid SDK -->
+		<!-- HTTP client (for mTLS + Basic Auth to Teller) -->
 		<dependency>
-			<groupId>com.plaid</groupId>
-			<artifactId>plaid-java</artifactId>
-			<version>${plaid.version}</version>
+			<groupId>org.apache.httpcomponents.client5</groupId>
+			<artifactId>httpclient5</artifactId>
+			<version>5.3.1</version>
 		</dependency>
+
 
 		<!-- JWT -->
 		<dependency>
@@ -100,16 +100,10 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- Testing -->
+		<!-- Tests -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -119,14 +113,6 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
-				<configuration>
-					<excludes>
-						<exclude>
-							<groupId>org.projectlombok</groupId>
-							<artifactId>lombok</artifactId>
-						</exclude>
-					</excludes>
-				</configuration>
 			</plugin>
 		</plugins>
 	</build>

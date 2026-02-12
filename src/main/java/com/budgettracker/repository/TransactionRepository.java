@@ -20,9 +20,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     List<Transaction> findByUserIdAndCategoryId(Long userId, Long categoryId);
 
-    Optional<Transaction> findByPlaidTransactionId(String plaidTransactionId);
+    Optional<Transaction> findByTellerTransactionId(String tellerTransactionId);
 
-    boolean existsByPlaidTransactionId(String plaidTransactionId);
+    boolean existsByTellerTransactionId(String tellerTransactionId);
 
     @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
             "AND t.date BETWEEN :startDate AND :endDate " +

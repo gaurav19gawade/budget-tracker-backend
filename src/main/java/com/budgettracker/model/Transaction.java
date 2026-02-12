@@ -29,11 +29,11 @@ public class Transaction {
     private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "plaid_item_id")
-    private PlaidItem plaidItem;
+    @JoinColumn(name = "teller_enrollment_id")
+    private TellerEnrollment tellerEnrollment;
 
     @Column(unique = true)
-    private String plaidTransactionId;
+    private String tellerTransactionId;
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;

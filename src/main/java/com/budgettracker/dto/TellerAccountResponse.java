@@ -8,13 +8,12 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PlaidAccountDTO {
-
+@Builder
+public class TellerAccountResponse {
     private Long id;
     private String institutionName;
+    private LocalDateTime connectedAt;
     private LocalDateTime lastSyncedAt;
-    private LocalDateTime createdAt;
 }

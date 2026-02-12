@@ -24,6 +24,6 @@ public class TransactionResponse {
     private String categoryName;
     private Boolean isManual;
     private Boolean pending;
-    private String plaidTransactionId;
+    private String tellerTransactionId;
     private LocalDateTime createdAt;
 }
