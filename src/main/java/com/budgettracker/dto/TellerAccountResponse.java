@@ -14,6 +14,9 @@ import java.time.LocalDateTime;
 public class TellerAccountResponse {
     private Long id;
     private String institutionName;
+    private String accountType;     // "depository" | "credit"
+    private String accountSubtype;  // "checking" | "savings" | "credit_card"
+    private String environment;     // "sandbox" | "development" | "production"
     private LocalDateTime connectedAt;
     private LocalDateTime lastSyncedAt;
 }

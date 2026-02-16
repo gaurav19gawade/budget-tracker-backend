@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "teller_enrollments")
@@ -22,25 +23,32 @@ public class TellerEnrollment {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    /**
-     * Teller enrollment id (enr_xxx) returned by Teller Connect.
-     * Enrollment is Teller’s equivalent of a user login at an FI. :contentReference[oaicite:5]{index=5}
-     */
     @Column(unique = true, nullable = false)
     private String enrollmentId;
 
-    /**
-     * Teller access token returned by Teller Connect.
-     * Stored encrypted-at-rest in a real system (KMS/Vault), but kept as-is here for your project.
-     */
     @Column(nullable = false, columnDefinition = "TEXT")
     private String accessToken;
 
     private String institutionName;
 
+    // e.g. "depository", "credit"
+    private String accountType;
+
+    // e.g. "checking", "savings", "credit_card"
+    private String accountSubtype;
+
     private LocalDateTime lastSyncedAt;
+
+    private String environment;
 
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    // Back-reference for cascade delete — when enrollment is deleted,
+    // all linked transactions are deleted too (resolves FK constraint)
+    @OneToMany(mappedBy = "tellerEnrollment", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<Transaction> transactions;
 }

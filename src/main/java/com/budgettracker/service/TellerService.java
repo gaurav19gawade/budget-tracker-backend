@@ -29,9 +29,13 @@ public class TellerService {
     private final TellerEnrollmentRepository tellerEnrollmentRepository;
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
+    private final CategorizationService categorizationService;
 
     @Value("${teller.base-url}")
     private String baseUrl;
+
+    @Value("${teller.connect.env:sandbox}")
+    private String tellerEnvironment;
 
     /**
      * Teller Connect returns accessToken + enrollment info directly (no Plaid-style exchange). :contentReference[oaicite:6]{index=6}
@@ -46,9 +50,12 @@ public class TellerService {
                 .accessToken(accessToken)
                 .enrollmentId(enrollmentId)
                 .institutionName(institutionName != null ? institutionName : "Unknown Institution")
+                .environment(tellerEnvironment)
                 .build();
 
         enrollment = tellerEnrollmentRepository.save(enrollment);
+        categorizationService.categorizeForUser(enrollment.getUser().getId());
+        log.info("Auto-categorization complete for user {}", enrollment.getUser().getId());
 
         // Sync immediately
         syncTransactions(enrollment.getId());
@@ -57,6 +64,7 @@ public class TellerService {
                 .id(enrollment.getId())
                 .institutionName(enrollment.getInstitutionName())
                 .connectedAt(enrollment.getCreatedAt())
+                .environment(enrollment.getEnvironment())
                 .lastSyncedAt(enrollment.getLastSyncedAt())
                 .build();
     }
