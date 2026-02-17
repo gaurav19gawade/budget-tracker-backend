@@ -2,7 +2,7 @@ package com.budgettracker.controller;
 
 import com.budgettracker.dto.UserPreferenceDtos.UserPreferenceRequest;
 import com.budgettracker.dto.UserPreferenceDtos.UserPreferenceResponse;
-import com.budgettracker.model.User;
+import com.budgettracker.security.UserPrincipal;
 import com.budgettracker.service.UserPreferenceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,14 +18,14 @@ public class UserPreferenceController {
 
     @GetMapping
     public ResponseEntity<UserPreferenceResponse> getPreference(
-            @AuthenticationPrincipal User user) {
-        return ResponseEntity.ok(preferenceService.getPreference(user.getId()));
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+        return ResponseEntity.ok(preferenceService.getPreference(currentUser.getId()));
     }
 
     @PutMapping
     public ResponseEntity<UserPreferenceResponse> updatePreference(
-            @AuthenticationPrincipal User user,
+            @AuthenticationPrincipal UserPrincipal currentUser,
             @RequestBody UserPreferenceRequest request) {
-        return ResponseEntity.ok(preferenceService.updatePreference(user.getId(), request));
+        return ResponseEntity.ok(preferenceService.updatePreference(currentUser.getId(), request));
     }
 }
