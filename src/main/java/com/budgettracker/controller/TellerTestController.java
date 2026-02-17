@@ -1,11 +1,10 @@
 package com.budgettracker.controller;
 
-import com.budgettracker.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
@@ -15,6 +14,8 @@ import java.util.Map;
 /**
  * TEMPORARY TEST CONTROLLER - Remove after testing Teller API responses
  * This helps us understand what data Teller returns for accounts and transactions
+ *
+ * IMPORTANT: Uses tellerRestTemplate which includes mTLS client certificates
  */
 @RestController
 @RequestMapping("/api/test/teller")
@@ -22,7 +23,8 @@ import java.util.Map;
 @Slf4j
 public class TellerTestController {
 
-    private final RestTemplate restTemplate;
+    @Qualifier("tellerRestTemplate")  // THIS IS CRITICAL - uses mTLS-configured RestTemplate
+    private final RestTemplate tellerRestTemplate;
 
     @Value("${teller.base-url}")
     private String baseUrl;
@@ -43,7 +45,7 @@ public class TellerTestController {
             headers.setBasicAuth(accessToken, "");
 
             HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<List> response = restTemplate.exchange(url, HttpMethod.GET, entity, List.class);
+            ResponseEntity<List> response = tellerRestTemplate.exchange(url, HttpMethod.GET, entity, List.class);
 
             List<Map<String, Object>> accounts = (List<Map<String, Object>>) (List<?>) response.getBody();
 
@@ -96,7 +98,7 @@ public class TellerTestController {
             headers.setBasicAuth(accessToken, "");
 
             HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<List> response = restTemplate.exchange(url, HttpMethod.GET, entity, List.class);
+            ResponseEntity<List> response = tellerRestTemplate.exchange(url, HttpMethod.GET, entity, List.class);
 
             List<Map<String, Object>> transactions = (List<Map<String, Object>>) (List<?>) response.getBody();
 
