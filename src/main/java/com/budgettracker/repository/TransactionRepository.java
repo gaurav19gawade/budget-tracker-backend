@@ -58,4 +58,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
             "AND t.pending = true")
     List<Transaction> findPendingTransactionsByUserId(@Param("userId") Long userId);
+
+    // Account type filtering
+    List<Transaction> findByUserIdAndAccountType(Long userId, String accountType);
+
+    List<Transaction> findByUserIdAndAccountSubtype(Long userId, String accountSubtype);
+
+    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+            "AND (:accountType IS NULL OR t.accountType = :accountType) " +
+            "AND (:accountSubtype IS NULL OR t.accountSubtype = :accountSubtype) " +
+            "ORDER BY t.date DESC")
+    List<Transaction> findByUserIdWithAccountFilters(
+            @Param("userId") Long userId,
+            @Param("accountType") String accountType,
+            @Param("accountSubtype") String accountSubtype
+    );
 }

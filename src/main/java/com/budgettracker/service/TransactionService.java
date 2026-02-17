@@ -92,6 +92,14 @@ public class TransactionService {
                 .collect(Collectors.toList());
     }
 
+    public List<TransactionResponse> getTransactionsByAccountType(
+            Long userId, String accountType, String accountSubtype) {
+
+        return transactionRepository.findByUserIdWithAccountFilters(userId, accountType, accountSubtype).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
     public TransactionResponse getTransactionById(Long userId, Long transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found"));
@@ -160,6 +168,11 @@ public class TransactionService {
                 .isManual(transaction.getIsManual())
                 .pending(transaction.getPending())
                 .tellerTransactionId(transaction.getTellerTransactionId())
+                .tellerAccountId(transaction.getTellerAccountId())
+                .accountType(transaction.getAccountType())
+                .accountSubtype(transaction.getAccountSubtype())
+                .accountName(transaction.getAccountName())
+                .accountLastFour(transaction.getAccountLastFour())
                 .createdAt(transaction.getCreatedAt())
                 .build();
     }

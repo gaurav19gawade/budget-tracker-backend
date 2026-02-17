@@ -36,7 +36,16 @@ public class TransactionController {
             @AuthenticationPrincipal UserPrincipal currentUser,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(required = false) Long categoryId) {
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String accountType,
+            @RequestParam(required = false) String accountSubtype) {
+
+        // Filter by account type/subtype
+        if (accountType != null || accountSubtype != null) {
+            List<TransactionResponse> transactions = transactionService.getTransactionsByAccountType(
+                    currentUser.getId(), accountType, accountSubtype);
+            return ResponseEntity.ok(transactions);
+        }
 
         // Filter by category
         if (categoryId != null) {

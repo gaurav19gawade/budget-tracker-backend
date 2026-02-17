@@ -12,7 +12,9 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "transactions", indexes = {
         @Index(name = "idx_user_date", columnList = "user_id,date"),
-        @Index(name = "idx_category", columnList = "category_id")
+        @Index(name = "idx_category", columnList = "category_id"),
+        @Index(name = "idx_account_type", columnList = "account_type"),
+        @Index(name = "idx_account_subtype", columnList = "account_subtype")
 })
 @Data
 @NoArgsConstructor
@@ -34,6 +36,21 @@ public class Transaction {
 
     @Column(unique = true)
     private String tellerTransactionId;
+
+    // Account information from Teller
+    private String tellerAccountId;
+
+    @Column(name = "account_type", length = 50)
+    private String accountType;  // "credit", "depository"
+
+    @Column(name = "account_subtype", length = 50)
+    private String accountSubtype;  // "credit_card", "checking", "savings"
+
+    @Column(name = "account_name")
+    private String accountName;  // "Freedom Unlimited", "TOTAL CHECKING", etc.
+
+    @Column(name = "account_last_four", length = 4)
+    private String accountLastFour;  // Last 4 digits for display
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;

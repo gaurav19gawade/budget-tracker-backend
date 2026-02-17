@@ -90,6 +90,12 @@ public class TellerService {
             String accountId = Objects.toString(account.get("id"), null);
             if (accountId == null) continue;
 
+            // Extract account information from Teller API
+            String accountType = Objects.toString(account.get("type"), null);
+            String accountSubtype = Objects.toString(account.get("subtype"), null);
+            String accountName = Objects.toString(account.get("name"), "Unknown Account");
+            String accountLastFour = Objects.toString(account.get("last_four"), null);
+
             List<Map<String, Object>> txns = listTransactions(enrollment.getAccessToken(), accountId);
 
             for (Map<String, Object> t : txns) {
@@ -120,6 +126,11 @@ public class TellerService {
                         .user(enrollment.getUser())
                         .tellerEnrollment(enrollment)
                         .tellerTransactionId(tellerTxnId)
+                        .tellerAccountId(accountId)
+                        .accountType(accountType)
+                        .accountSubtype(accountSubtype)
+                        .accountName(accountName)
+                        .accountLastFour(accountLastFour)
                         .amount(amount != null ? amount : BigDecimal.ZERO)
                         .date(date)
                         .merchantName(merchant)
