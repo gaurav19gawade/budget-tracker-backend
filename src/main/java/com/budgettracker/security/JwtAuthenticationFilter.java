@@ -44,8 +44,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 UserPrincipal userPrincipal = UserPrincipal.create(user);
 
                 UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        new UsernamePasswordAuthenticationToken(
+                                userPrincipal, null, userPrincipal.getAuthorities());
+                authentication.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
@@ -57,14 +59,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Token extraction strategy (in priority order):
-     *  1. httpOnly cookie — preferred; safe from XSS since JS can't read it
-     *  2. Authorization: Bearer header — fallback for local dev tools (Postman, curl, etc.)
+     * Token resolution order:
+     *  1. httpOnly cookie — preferred in browser (JS can't read it)
+     *  2. Authorization: Bearer header — fallback for Postman / curl / API clients
      */
     private String getJwtFromRequest(HttpServletRequest request) {
-        // 1. Try httpOnly cookie first
-        if (request.getCookies() != null) {
-            return Arrays.stream(request.getCookies())
+        // 1. Try cookie first
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            return Arrays.stream(cookies)
                     .filter(c -> cookieName.equals(c.getName()))
                     .map(Cookie::getValue)
                     .filter(StringUtils::hasText)
@@ -72,7 +75,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     .orElse(null);
         }
 
-        // 2. Fallback to Authorization header (useful for Postman, curl, API clients)
+        // 2. Fallback to Authorization header
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
             return bearerToken.substring(7);

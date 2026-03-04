@@ -63,7 +63,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
-                        .requestMatchers("/api/test/**").permitAll()  // Allow test endpoints
+                        .requestMatchers("/api/test/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
@@ -78,9 +78,30 @@ public class SecurityConfig {
 
         List<String> origins = Arrays.asList(allowedOriginsRaw.split(","));
         configuration.setAllowedOrigins(origins);
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+
+        // Wildcard (*) is rejected by browsers when allowCredentials=true.
+        // Must explicitly list every header the frontend sends.
+        configuration.setAllowedHeaders(Arrays.asList(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "Origin",
+                "X-Requested-With",
+                "Cache-Control"
+        ));
+
+        // Expose headers the frontend might need to read
+        configuration.setExposedHeaders(Arrays.asList(
+                "Set-Cookie",
+                "Authorization"
+        ));
+
+        // Required for cookies (withCredentials: true on the frontend)
         configuration.setAllowCredentials(true);
+
+        // Cache preflight response for 1 hour — reduces OPTIONS round-trips
+        configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
