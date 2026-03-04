@@ -17,6 +17,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -37,11 +38,9 @@ public class TellerService {
     @Value("${teller.connect.env:sandbox}")
     private String tellerEnvironment;
 
-    /**
-     * Teller Connect returns accessToken + enrollment info directly (no Plaid-style exchange). :contentReference[oaicite:6]{index=6}
-     */
     @Transactional
-    public TellerAccountResponse connectEnrollment(Long userId, String accessToken, String enrollmentId, String institutionName) {
+    public TellerAccountResponse connectEnrollment(Long userId, String accessToken,
+                                                   String enrollmentId, String institutionName) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -57,7 +56,6 @@ public class TellerService {
         categorizationService.categorizeForUser(enrollment.getUser().getId());
         log.info("Auto-categorization complete for user {}", enrollment.getUser().getId());
 
-        // Sync immediately
         syncTransactions(enrollment.getId());
 
         return TellerAccountResponse.builder()
@@ -69,10 +67,6 @@ public class TellerService {
                 .build();
     }
 
-    /**
-     * Sync transactions for all accounts under this enrollment.
-     * Teller returns accounts list for the access token, then transactions per account. :contentReference[oaicite:7]{index=7}
-     */
     @Transactional
     public void syncTransactions(Long tellerEnrollmentDbId) {
         TellerEnrollment enrollment = tellerEnrollmentRepository.findById(tellerEnrollmentDbId)
@@ -80,49 +74,52 @@ public class TellerService {
 
         List<Map<String, Object>> accounts = listAccounts(enrollment.getAccessToken());
 
-        // last 30 days like your Plaid logic
-        LocalDate endDate = LocalDate.now();
+        LocalDate endDate   = LocalDate.now();
         LocalDate startDate = endDate.minusDays(30);
 
-        int saved = 0;
+        // ── Step 1: fetch ALL existing Teller IDs for this enrollment in one query ──
+        // Previously: existsByTellerTransactionId() was called once per transaction
+        // in the inner loop — 1 SELECT per row. Now it's 1 SELECT total.
+        Set<String> existingIds = transactionRepository
+                .findExistingTellerTransactionIds(tellerEnrollmentDbId);
+
+        log.debug("Enrollment {} already has {} synced transactions",
+                tellerEnrollmentDbId, existingIds.size());
+
+        // ── Step 2: build list of new transactions across all accounts ───────────
+        List<Transaction> toSave = new ArrayList<>();
 
         for (Map<String, Object> account : accounts) {
             String accountId = Objects.toString(account.get("id"), null);
             if (accountId == null) continue;
 
-            // Extract account information from Teller API
-            String accountType = Objects.toString(account.get("type"), null);
-            String accountSubtype = Objects.toString(account.get("subtype"), null);
-            String accountName = Objects.toString(account.get("name"), "Unknown Account");
+            String accountType     = Objects.toString(account.get("type"), null);
+            String accountSubtype  = Objects.toString(account.get("subtype"), null);
+            String accountName     = Objects.toString(account.get("name"), "Unknown Account");
             String accountLastFour = Objects.toString(account.get("last_four"), null);
 
             List<Map<String, Object>> txns = listTransactions(enrollment.getAccessToken(), accountId);
 
             for (Map<String, Object> t : txns) {
-                // Teller transaction id field is "id" in their resources
                 String tellerTxnId = Objects.toString(t.get("id"), null);
                 if (tellerTxnId == null) continue;
 
-                if (transactionRepository.existsByTellerTransactionId(tellerTxnId)) {
-                    continue;
-                }
+                // ── Duplicate check is now an O(1) Set lookup, not a DB query ──
+                if (existingIds.contains(tellerTxnId)) continue;
 
-                // Best-effort mapping (Teller’s schema differs from Plaid; you can refine later)
                 BigDecimal amount = parseAmount(t.get("amount"));
-                LocalDate date = parseDate(t.get("date"));
-                if (date == null || date.isBefore(startDate) || date.isAfter(endDate)) {
-                    continue;
-                }
+                LocalDate date    = parseDate(t.get("date"));
+                if (date == null || date.isBefore(startDate) || date.isAfter(endDate)) continue;
 
                 String description = Objects.toString(t.get("description"), "");
-                String merchant = Objects.toString(t.get("merchant_name"), null);
+                String merchant    = Objects.toString(t.get("merchant_name"), null);
                 if (merchant == null || merchant.isBlank()) {
                     merchant = Objects.toString(t.get("counterparty"), description);
                 }
 
                 boolean pending = parseBoolean(t.get("pending"));
 
-                Transaction txn = Transaction.builder()
+                toSave.add(Transaction.builder()
                         .user(enrollment.getUser())
                         .tellerEnrollment(enrollment)
                         .tellerTransactionId(tellerTxnId)
@@ -137,18 +134,23 @@ public class TellerService {
                         .description(description)
                         .isManual(false)
                         .pending(pending)
-                        .build();
-
-                transactionRepository.save(txn);
-                saved++;
+                        .build());
             }
         }
 
-        enrollment.setLastSyncedAt(java.time.LocalDateTime.now());
+        // ── Step 3: single bulk insert instead of N individual INSERTs ───────────
+        // saveAll() combined with spring.jpa.properties.hibernate.jdbc.batch_size
+        // in application.properties lets Hibernate send all inserts in batched
+        // JDBC statements rather than one round trip per row.
+        if (!toSave.isEmpty()) {
+            transactionRepository.saveAll(toSave);
+        }
+
+        enrollment.setLastSyncedAt(LocalDateTime.now());
         tellerEnrollmentRepository.save(enrollment);
 
-        log.info("Synced Teller enrollment {} - accounts: {}, new txns saved: {}",
-                tellerEnrollmentDbId, accounts.size(), saved);
+        log.info("Synced Teller enrollment {} — accounts: {}, new txns saved: {}",
+                tellerEnrollmentDbId, accounts.size(), toSave.size());
     }
 
     public List<TellerAccountResponse> getConnectedAccounts(Long userId) {
@@ -171,45 +173,33 @@ public class TellerService {
             throw new RuntimeException("Unauthorized");
         }
 
-        // Teller does not have a direct analog of Plaid ItemRemove in the same way;
-        // you typically revoke/rotate certs / deauthorize via dashboard workflows.
-        // We delete local record.
         tellerEnrollmentRepository.delete(enrollment);
         log.info("Removed Teller enrollment {} for user {}", tellerEnrollmentDbId, userId);
     }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
     private List<Map<String, Object>> listAccounts(String accessToken) {
         String url = baseUrl + "/accounts";
-
-        HttpHeaders headers = basicAuthHeaders(accessToken);
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
+        HttpEntity<Void> entity = new HttpEntity<>(basicAuthHeaders(accessToken));
         ResponseEntity<List> response = tellerRestTemplate.exchange(url, HttpMethod.GET, entity, List.class);
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
             throw new RuntimeException("Failed to list Teller accounts");
         }
-
-        // each element is a map-like object (Jackson)
         return (List<Map<String, Object>>) (List<?>) response.getBody();
     }
 
     private List<Map<String, Object>> listTransactions(String accessToken, String accountId) {
-        // Teller transactions endpoint is per account. :contentReference[oaicite:8]{index=8}
         String url = baseUrl + "/accounts/" + accountId + "/transactions";
-
-        HttpHeaders headers = basicAuthHeaders(accessToken);
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
+        HttpEntity<Void> entity = new HttpEntity<>(basicAuthHeaders(accessToken));
         ResponseEntity<List> response = tellerRestTemplate.exchange(url, HttpMethod.GET, entity, List.class);
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
             throw new RuntimeException("Failed to list Teller transactions for account " + accountId);
         }
-
         return (List<Map<String, Object>>) (List<?>) response.getBody();
     }
 
     private HttpHeaders basicAuthHeaders(String accessToken) {
-        // Teller uses HTTP Basic Auth; username=accessToken, password is blank. :contentReference[oaicite:9]{index=9}
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
         headers.setBasicAuth(accessToken, "");
@@ -218,20 +208,14 @@ public class TellerService {
 
     private BigDecimal parseAmount(Object amountObj) {
         if (amountObj == null) return null;
-        try {
-            return new BigDecimal(amountObj.toString());
-        } catch (Exception e) {
-            return null;
-        }
+        try { return new BigDecimal(amountObj.toString()); }
+        catch (Exception e) { return null; }
     }
 
     private LocalDate parseDate(Object dateObj) {
         if (dateObj == null) return null;
-        try {
-            return LocalDate.parse(dateObj.toString());
-        } catch (Exception e) {
-            return null;
-        }
+        try { return LocalDate.parse(dateObj.toString()); }
+        catch (Exception e) { return null; }
     }
 
     private boolean parseBoolean(Object v) {
