@@ -88,8 +88,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     List<Transaction> findByUserIdAndAccountSubtype(Long userId, String accountSubtype);
 
     @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
-            "AND (:accountType IS NULL OR t.accountType = :accountType) " +
-            "AND (:accountSubtype IS NULL OR t.accountSubtype = :accountSubtype) " +
+            "AND (CAST(:accountType AS string) IS NULL OR t.accountType = :accountType) " +
+            "AND (CAST(:accountSubtype AS string) IS NULL OR t.accountSubtype = :accountSubtype) " +
             "ORDER BY t.date DESC")
     List<Transaction> findByUserIdWithAccountFilters(
             @Param("userId") Long userId,
@@ -103,11 +103,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
      * called exclusively, making filters mutually exclusive by accident.
      */
     @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
-            "AND (:startDate IS NULL OR t.date >= :startDate) " +
-            "AND (:endDate IS NULL OR t.date <= :endDate) " +
-            "AND (:categoryId IS NULL OR t.category.id = :categoryId) " +
-            "AND (:accountType IS NULL OR t.accountType = :accountType) " +
-            "AND (:accountSubtype IS NULL OR t.accountSubtype = :accountSubtype) " +
+            "AND (CAST(:startDate AS date) IS NULL OR t.date >= :startDate) " +
+            "AND (CAST(:endDate AS date) IS NULL OR t.date <= :endDate) " +
+            "AND (CAST(:categoryId AS long) IS NULL OR t.category.id = :categoryId) " +
+            "AND (CAST(:accountType AS string) IS NULL OR t.accountType = :accountType) " +
+            "AND (CAST(:accountSubtype AS string) IS NULL OR t.accountSubtype = :accountSubtype) " +
             "ORDER BY t.date DESC")
     List<Transaction> findByUserIdWithFilters(
             @Param("userId") Long userId,
