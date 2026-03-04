@@ -3,7 +3,7 @@ package com.budgettracker.controller;
 import com.budgettracker.dto.CategoryRequest;
 import com.budgettracker.dto.CategoryResponse;
 import com.budgettracker.security.UserPrincipal;
-import com.budgettracker.service.CategoryService;
+import com.budgettracker.schedule.CategoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

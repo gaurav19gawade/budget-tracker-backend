@@ -6,7 +6,6 @@ import com.budgettracker.dto.BudgetSummaryResponse;
 import com.budgettracker.exception.BadRequestException;
 import com.budgettracker.exception.ResourceNotFoundException;
 import com.budgettracker.model.Budget;
-import com.budgettracker.model.Budget.BudgetPeriod;
 import com.budgettracker.model.Category;
 import com.budgettracker.model.User;
 import com.budgettracker.repository.BudgetRepository;

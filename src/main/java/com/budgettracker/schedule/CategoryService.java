@@ -1,4 +1,4 @@
-package com.budgettracker.service;
+package com.budgettracker.schedule;
 
 import com.budgettracker.dto.CategoryRequest;
 import com.budgettracker.dto.CategoryResponse;
