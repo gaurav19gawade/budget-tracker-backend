@@ -70,6 +70,34 @@ public class TransactionService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Unified filter method — all params nullable, any combination works.
+     * Called by TransactionController.getUserTransactions() replacing the
+     * old if/else chain that made filters mutually exclusive.
+     */
+    public List<TransactionResponse> getTransactions(
+            Long userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            Long categoryId,
+            String accountType,
+            String accountSubtype) {
+
+        if (categoryId != null) {
+            Category category = categoryRepository.findById(categoryId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
+            if (!category.getUser().getId().equals(userId)) {
+                throw new BadRequestException("Unauthorized access to category");
+            }
+        }
+
+        return transactionRepository
+                .findByUserIdWithFilters(userId, startDate, endDate, categoryId, accountType, accountSubtype)
+                .stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
     public List<TransactionResponse> getTransactionsByDateRange(
             Long userId, LocalDate startDate, LocalDate endDate) {
 

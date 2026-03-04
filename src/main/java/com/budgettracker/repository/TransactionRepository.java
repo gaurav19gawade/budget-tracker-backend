@@ -96,4 +96,25 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("accountType") String accountType,
             @Param("accountSubtype") String accountSubtype
     );
+
+    /**
+     * Unified filter query — all params nullable, any combination works.
+     * Replaces the old separate methods that the controller's if/else chain
+     * called exclusively, making filters mutually exclusive by accident.
+     */
+    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+            "AND (:startDate IS NULL OR t.date >= :startDate) " +
+            "AND (:endDate IS NULL OR t.date <= :endDate) " +
+            "AND (:categoryId IS NULL OR t.category.id = :categoryId) " +
+            "AND (:accountType IS NULL OR t.accountType = :accountType) " +
+            "AND (:accountSubtype IS NULL OR t.accountSubtype = :accountSubtype) " +
+            "ORDER BY t.date DESC")
+    List<Transaction> findByUserIdWithFilters(
+            @Param("userId") Long userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("categoryId") Long categoryId,
+            @Param("accountType") String accountType,
+            @Param("accountSubtype") String accountSubtype
+    );
 }

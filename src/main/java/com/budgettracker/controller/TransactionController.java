@@ -40,29 +40,16 @@ public class TransactionController {
             @RequestParam(required = false) String accountType,
             @RequestParam(required = false) String accountSubtype) {
 
-        // Filter by account type/subtype
-        if (accountType != null || accountSubtype != null) {
-            List<TransactionResponse> transactions = transactionService.getTransactionsByAccountType(
-                    currentUser.getId(), accountType, accountSubtype);
-            return ResponseEntity.ok(transactions);
-        }
+        // Previously: a chain of if/else that applied only ONE filter even when
+        // multiple were passed — accountType won over categoryId, categoryId won
+        // over date range, etc. Filters were mutually exclusive by accident.
+        //
+        // Now: all filters are passed to the service together. The service and
+        // repository handle nullable params gracefully — null means "no filter
+        // on this field", so any combination works correctly.
+        List<TransactionResponse> transactions = transactionService.getTransactions(
+                currentUser.getId(), startDate, endDate, categoryId, accountType, accountSubtype);
 
-        // Filter by category
-        if (categoryId != null) {
-            List<TransactionResponse> transactions = transactionService.getTransactionsByCategory(
-                    currentUser.getId(), categoryId);
-            return ResponseEntity.ok(transactions);
-        }
-
-        // Filter by date range
-        if (startDate != null && endDate != null) {
-            List<TransactionResponse> transactions = transactionService.getTransactionsByDateRange(
-                    currentUser.getId(), startDate, endDate);
-            return ResponseEntity.ok(transactions);
-        }
-
-        // Return all transactions
-        List<TransactionResponse> transactions = transactionService.getUserTransactions(currentUser.getId());
         return ResponseEntity.ok(transactions);
     }
 
