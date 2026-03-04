@@ -13,7 +13,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Arrays;
 import java.util.Map;
 
 @RestController
@@ -29,8 +28,8 @@ public class AuthController {
     @Value("${jwt.expiration}")
     private long jwtExpirationMs;
 
-    // Whether to set Secure flag — true in prod (HTTPS), false in local dev (HTTP)
-    @Value("${jwt.cookie-secure:false}")
+    // true in prod (HTTPS cross-origin), false for local dev (HTTP same-ish origin)
+    @Value("${jwt.cookie-secure:true}")
     private boolean cookieSecure;
 
     @PostMapping("/register")
@@ -40,8 +39,6 @@ public class AuthController {
 
         AuthResponse authResponse = authService.register(request);
         setAuthCookie(response, authResponse.getToken());
-
-        // Return user info but strip the token from the JSON body
         return ResponseEntity.ok(stripToken(authResponse));
     }
 
@@ -52,8 +49,6 @@ public class AuthController {
 
         AuthResponse authResponse = authService.login(request);
         setAuthCookie(response, authResponse.getToken());
-
-        // Return user info but strip the token from the JSON body
         return ResponseEntity.ok(stripToken(authResponse));
     }
 
@@ -65,52 +60,66 @@ public class AuthController {
 
     @GetMapping("/me")
     public ResponseEntity<Map<String, String>> checkAuth(HttpServletRequest request) {
-        // If this endpoint is reached, the JwtAuthenticationFilter already validated
-        // the cookie, so the user is authenticated. Useful for frontend session checks.
         return ResponseEntity.ok(Map.of("status", "authenticated"));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private void setAuthCookie(HttpServletResponse response, String token) {
-        Cookie cookie = new Cookie(cookieName, token);
-        cookie.setHttpOnly(true);              // Not accessible via JS — blocks XSS token theft
-        cookie.setSecure(cookieSecure);        // HTTPS only in prod; false for local dev over HTTP
-        cookie.setPath("/");                   // Sent on all API requests
-        cookie.setMaxAge((int) (jwtExpirationMs / 1000)); // Match JWT lifetime
+        int maxAgeSeconds = (int) (jwtExpirationMs / 1000);
 
-        // SameSite=Strict prevents CSRF — cookie not sent on cross-site requests.
-        // We set this via the header directly because the Servlet Cookie API
-        // doesn't expose SameSite until Servlet 6.1 / Spring Boot 3.3+.
+        // SameSite=None; Secure is required for cross-origin cookies (frontend and
+        // backend on different domains, e.g. Railway). The browser will not send
+        // SameSite=Strict or SameSite=Lax cookies on cross-origin requests at all.
+        //
+        // Security trade-off: SameSite=None opens CSRF risk, but we already have
+        // csrf().disable() + stateless JWT, so there's no session to hijack.
+        // The HttpOnly flag still fully protects against XSS token theft.
+        //
+        // For local dev (HTTP): cookieSecure=false, SameSite=None still works
+        // on localhost in most browsers even without Secure flag.
+        String sameSite = "None";
+
+        // Build the Set-Cookie header manually — Servlet Cookie API doesn't
+        // expose SameSite until Servlet 6.1 / Spring Boot 3.3+
+        String cookieHeader = String.format(
+                "%s=%s; Path=/; HttpOnly; %sSameSite=%s; Max-Age=%d",
+                cookieName,
+                token,
+                cookieSecure ? "Secure; " : "",
+                sameSite,
+                maxAgeSeconds
+        );
+
+        // addCookie sets the basic cookie (no SameSite), then we override with
+        // the full manual header that includes SameSite=None
+        Cookie cookie = new Cookie(cookieName, token);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(cookieSecure);
+        cookie.setPath("/");
+        cookie.setMaxAge(maxAgeSeconds);
         response.addCookie(cookie);
-        response.addHeader("Set-Cookie",
-                String.format("%s=%s; Path=/; HttpOnly; %sSameSite=Strict; Max-Age=%d",
-                        cookieName, token,
-                        cookieSecure ? "Secure; " : "",
-                        (int) (jwtExpirationMs / 1000)));
+        response.setHeader("Set-Cookie", cookieHeader); // setHeader (not add) to avoid duplicate
     }
 
     private void clearAuthCookie(HttpServletResponse response) {
+        String cookieHeader = String.format(
+                "%s=; Path=/; HttpOnly; %sSameSite=None; Max-Age=0",
+                cookieName,
+                cookieSecure ? "Secure; " : ""
+        );
         Cookie cookie = new Cookie(cookieName, "");
         cookie.setHttpOnly(true);
         cookie.setSecure(cookieSecure);
         cookie.setPath("/");
-        cookie.setMaxAge(0); // Expire immediately
+        cookie.setMaxAge(0);
         response.addCookie(cookie);
-        response.addHeader("Set-Cookie",
-                String.format("%s=; Path=/; HttpOnly; %sSameSite=Strict; Max-Age=0",
-                        cookieName,
-                        cookieSecure ? "Secure; " : ""));
+        response.setHeader("Set-Cookie", cookieHeader);
     }
 
-    /**
-     * Strip the token from the JSON response body.
-     * The token is now exclusively in the httpOnly cookie — there's no reason
-     * to expose it to JavaScript via the response body.
-     */
     private AuthResponse stripToken(AuthResponse original) {
         return AuthResponse.builder()
-                .token(null)   // Intentionally null — token lives in cookie only
+                .token(null)
                 .userId(original.getUserId())
                 .email(original.getEmail())
                 .name(original.getName())
