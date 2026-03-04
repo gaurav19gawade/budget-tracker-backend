@@ -29,12 +29,10 @@ public class AuthService {
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        // Check if email already exists
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new BadRequestException("Email is already registered");
         }
 
-        // Create new user
         User user = User.builder()
                 .name(request.getName())
                 .email(request.getEmail())
@@ -44,14 +42,11 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("New user registered: {}", user.getEmail());
 
-        // Generate JWT token
         Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
+        // Token returned here so AuthController can set it as a cookie.
+        // The controller calls stripToken() before sending the response body.
         String token = tokenProvider.generateToken(authentication);
 
         return AuthResponse.builder()
@@ -63,15 +58,9 @@ public class AuthService {
     }
 
     public AuthResponse login(AuthRequest request) {
-        // Authenticate user
         Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
-        // Generate JWT token
         String token = tokenProvider.generateToken(authentication);
 
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();

@@ -3,34 +3,50 @@ package com.budgettracker.controller;
 import com.budgettracker.dto.AuthRequest;
 import com.budgettracker.dto.AuthResponse;
 import com.budgettracker.dto.RegisterRequest;
+import com.budgettracker.security.JwtTokenProvider;
+import com.budgettracker.security.UserPrincipal;
 import com.budgettracker.service.AuthService;
+import com.budgettracker.service.RefreshTokenService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Arrays;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Slf4j
 public class AuthController {
 
     private final AuthService authService;
+    private final RefreshTokenService refreshTokenService;
+    private final JwtTokenProvider tokenProvider;
 
     @Value("${jwt.cookie-name:auth_token}")
-    private String cookieName;
+    private String accessCookieName;
 
-    @Value("${jwt.expiration}")
-    private long jwtExpirationMs;
+    @Value("${jwt.refresh-cookie-name:refresh_token}")
+    private String refreshCookieName;
 
-    // true in prod (HTTPS cross-origin), false for local dev (HTTP same-ish origin)
     @Value("${jwt.cookie-secure:true}")
     private boolean cookieSecure;
+
+    @Value("${jwt.expiration:900000}")
+    private long accessExpirationMs;
+
+    @Value("${jwt.refresh-expiration:2592000000}")
+    private long refreshExpirationMs;
 
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(
@@ -38,7 +54,8 @@ public class AuthController {
             HttpServletResponse response) {
 
         AuthResponse authResponse = authService.register(request);
-        setAuthCookie(response, authResponse.getToken());
+        setAuthCookies(response, authResponse.getToken(),
+                refreshTokenService.createRefreshToken(authResponse.getUserId()));
         return ResponseEntity.ok(stripToken(authResponse));
     }
 
@@ -48,81 +65,98 @@ public class AuthController {
             HttpServletResponse response) {
 
         AuthResponse authResponse = authService.login(request);
-        setAuthCookie(response, authResponse.getToken());
+        setAuthCookies(response, authResponse.getToken(),
+                refreshTokenService.createRefreshToken(authResponse.getUserId()));
         return ResponseEntity.ok(stripToken(authResponse));
     }
 
+    /**
+     * Silent token refresh — called automatically by the axios interceptor when
+     * any request returns 401. Reads the refresh cookie, validates it, rotates it
+     * (issues a new refresh token), and sets a fresh access token cookie.
+     * The frontend retries the original request transparently.
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<Void> refresh(
+            HttpServletRequest request,
+            HttpServletResponse response) {
+
+        String rawRefreshToken = extractCookie(request, refreshCookieName);
+        if (rawRefreshToken == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No refresh token");
+        }
+
+        try {
+            // validateAndRotate revokes the old token and returns the userId
+            Long userId = refreshTokenService.validateAndRotate(rawRefreshToken);
+
+            // Issue new access token
+            String newAccessToken = tokenProvider.generateTokenFromUserId(userId);
+
+            // Issue new refresh token (rotation — each refresh token is single-use)
+            String newRefreshToken = refreshTokenService.createRefreshToken(userId);
+
+            setAuthCookies(response, newAccessToken, newRefreshToken);
+            return ResponseEntity.ok().build();
+
+        } catch (Exception e) {
+            // Clear cookies so the browser doesn't keep sending a bad refresh token
+            clearAuthCookies(response);
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh failed");
+        }
+    }
+
     @PostMapping("/logout")
-    public ResponseEntity<Map<String, String>> logout(HttpServletResponse response) {
-        clearAuthCookie(response);
-        return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
+    public ResponseEntity<Void> logout(
+            @AuthenticationPrincipal UserPrincipal currentUser,
+            HttpServletResponse response) {
+
+        if (currentUser != null) {
+            refreshTokenService.revokeAll(currentUser.getId());
+        }
+        clearAuthCookies(response);
+        return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/me")
-    public ResponseEntity<Map<String, String>> checkAuth(HttpServletRequest request) {
-        return ResponseEntity.ok(Map.of("status", "authenticated"));
+    // ── Cookie helpers ────────────────────────────────────────────────────────
+
+    private void setAuthCookies(HttpServletResponse response,
+                                String accessToken, String refreshToken) {
+        response.addHeader("Set-Cookie", buildCookie(
+                accessCookieName, accessToken,
+                (int) (accessExpirationMs / 1000)));
+
+        response.addHeader("Set-Cookie", buildCookie(
+                refreshCookieName, refreshToken,
+                (int) (refreshExpirationMs / 1000)));
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    private void clearAuthCookies(HttpServletResponse response) {
+        response.addHeader("Set-Cookie", buildCookie(accessCookieName, "", 0));
+        response.addHeader("Set-Cookie", buildCookie(refreshCookieName, "", 0));
+    }
 
-    private void setAuthCookie(HttpServletResponse response, String token) {
-        int maxAgeSeconds = (int) (jwtExpirationMs / 1000);
-
-        // SameSite=None; Secure is required for cross-origin cookies (frontend and
-        // backend on different domains, e.g. Railway). The browser will not send
-        // SameSite=Strict or SameSite=Lax cookies on cross-origin requests at all.
-        //
-        // Security trade-off: SameSite=None opens CSRF risk, but we already have
-        // csrf().disable() + stateless JWT, so there's no session to hijack.
-        // The HttpOnly flag still fully protects against XSS token theft.
-        //
-        // For local dev (HTTP): cookieSecure=false, SameSite=None still works
-        // on localhost in most browsers even without Secure flag.
-        String sameSite = "None";
-
-        // Build the Set-Cookie header manually — Servlet Cookie API doesn't
-        // expose SameSite until Servlet 6.1 / Spring Boot 3.3+
-        String cookieHeader = String.format(
-                "%s=%s; Path=/; HttpOnly; %sSameSite=%s; Max-Age=%d",
-                cookieName,
-                token,
+    private String buildCookie(String name, String value, int maxAge) {
+        return String.format(
+                "%s=%s; Path=/; HttpOnly; %sSameSite=None; Max-Age=%d",
+                name, value,
                 cookieSecure ? "Secure; " : "",
-                sameSite,
-                maxAgeSeconds
+                maxAge
         );
-
-        // addCookie sets the basic cookie (no SameSite), then we override with
-        // the full manual header that includes SameSite=None
-        Cookie cookie = new Cookie(cookieName, token);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/");
-        cookie.setMaxAge(maxAgeSeconds);
-        response.addCookie(cookie);
-        response.setHeader("Set-Cookie", cookieHeader); // setHeader (not add) to avoid duplicate
     }
 
-    private void clearAuthCookie(HttpServletResponse response) {
-        String cookieHeader = String.format(
-                "%s=; Path=/; HttpOnly; %sSameSite=None; Max-Age=0",
-                cookieName,
-                cookieSecure ? "Secure; " : ""
-        );
-        Cookie cookie = new Cookie(cookieName, "");
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
-        response.setHeader("Set-Cookie", cookieHeader);
+    private String extractCookie(HttpServletRequest request, String name) {
+        if (request.getCookies() == null) return null;
+        return Arrays.stream(request.getCookies())
+                .filter(c -> name.equals(c.getName()))
+                .map(Cookie::getValue)
+                .findFirst()
+                .orElse(null);
     }
 
-    private AuthResponse stripToken(AuthResponse original) {
-        return AuthResponse.builder()
-                .token(null)
-                .userId(original.getUserId())
-                .email(original.getEmail())
-                .name(original.getName())
-                .build();
+    /** Remove token from response body — it lives in the cookie only. */
+    private AuthResponse stripToken(AuthResponse response) {
+        response.setToken(null);
+        return response;
     }
 }
