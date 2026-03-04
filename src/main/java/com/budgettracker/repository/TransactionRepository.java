@@ -43,7 +43,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDate endDate
     );
 
-    // Used in BudgetService and NotificationService to calculate spending
+    // Used in NotificationService — single category spend check
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.user.id = :userId " +
             "AND t.category.id = :categoryId " +
@@ -51,6 +51,31 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     BigDecimal sumAmountByUserIdAndCategoryIdAndDateRange(
             @Param("userId") Long userId,
             @Param("categoryId") Long categoryId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+
+    /**
+     * Bulk version — returns spending totals for ALL categories in a single query.
+     * Used by BudgetService to eliminate the N+1 problem in getBudgetSummary()
+     * and mapToResponse() loops.
+     *
+     * Returns a list of Object[] where:
+     *   [0] = categoryId (Long)
+     *   [1] = total spent (BigDecimal)
+     *
+     * Note: only categories that have at least one transaction in the date range
+     * appear in the result — categories with zero spend are absent (not zero).
+     * The service handles this by defaulting missing entries to BigDecimal.ZERO.
+     */
+    @Query("SELECT t.category.id, COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+            "WHERE t.user.id = :userId " +
+            "AND t.category.id IN :categoryIds " +
+            "AND t.date BETWEEN :startDate AND :endDate " +
+            "GROUP BY t.category.id")
+    List<Object[]> sumAmountGroupedByCategoryIds(
+            @Param("userId") Long userId,
+            @Param("categoryIds") List<Long> categoryIds,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
