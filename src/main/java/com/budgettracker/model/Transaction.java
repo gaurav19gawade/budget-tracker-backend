@@ -16,56 +16,74 @@ import java.time.LocalDateTime;
         @Index(name = "idx_account_type", columnList = "account_type"),
         @Index(name = "idx_account_subtype", columnList = "account_subtype")
 })
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@ToString(onlyExplicitlyIncluded = true)
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Transaction {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @ToString.Include
+    @EqualsAndHashCode.Include
     private Long id;
 
+    // All ManyToOne associations excluded — each points back to an entity
+    // that holds a collection of Transactions, creating a recursion cycle.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teller_enrollment_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private TellerEnrollment tellerEnrollment;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private Category category;
+
     @Column(unique = true)
+    @ToString.Include
     private String tellerTransactionId;
 
-    // Account information from Teller
     private String tellerAccountId;
 
     @Column(name = "account_type", length = 50)
-    private String accountType;  // "credit", "depository"
+    @ToString.Include
+    private String accountType;
 
     @Column(name = "account_subtype", length = 50)
-    private String accountSubtype;  // "credit_card", "checking", "savings"
+    @ToString.Include
+    private String accountSubtype;
 
     @Column(name = "account_name")
-    private String accountName;  // "Freedom Unlimited", "TOTAL CHECKING", etc.
+    private String accountName;
 
     @Column(name = "account_last_four", length = 4)
-    private String accountLastFour;  // Last 4 digits for display
+    private String accountLastFour;
 
     @Column(nullable = false, precision = 10, scale = 2)
+    @ToString.Include
     private BigDecimal amount;
 
     @Column(nullable = false)
+    @ToString.Include
     private LocalDate date;
 
+    @ToString.Include
     private String merchantName;
 
     @Column(columnDefinition = "TEXT")
     private String description;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id")
-    private Category category;
 
     @Column(nullable = false)
     private Boolean isManual = false;
