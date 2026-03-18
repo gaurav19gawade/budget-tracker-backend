@@ -9,10 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,15 +19,26 @@ public class CategorizationService {
 
     private final CategoryRepository categoryRepository;
     private final TransactionRepository transactionRepository;
+    private final AnthropicCategorizationService llmService;
 
-    // Keyword → canonical category name mapping
-    // Keys are lowercase substrings to match against merchant name
+    // Keyword → canonical category name mapping.
+    // Keys are lowercase substrings matched against the normalized merchant name.
+    // Order matters — first match wins. More specific rules go first.
     private static final Map<String, String> KEYWORD_RULES = new LinkedHashMap<>() {{
+        // Food Delivery (before Restaurants — doordash/ubereats are delivery, not restaurants)
+        put("doordash",        "Food Delivery");
+        put("uber eats",       "Food Delivery");
+        put("ubereats",        "Food Delivery");
+        put("grubhub",         "Food Delivery");
+        put("postmates",       "Food Delivery");
+        put("instacart",       "Food Delivery");
+        put("seamless",        "Food Delivery");
+        put("caviar",          "Food Delivery");
+
         // Restaurants / Fast Food
         put("chipotle",        "Restaurants");
         put("mcdonald",        "Restaurants");
         put("starbucks",       "Restaurants");
-        put("subway",          "Restaurants");
         put("dunkin",          "Restaurants");
         put("taco bell",       "Restaurants");
         put("burger king",     "Restaurants");
@@ -52,16 +61,8 @@ public class CategorizationService {
         put("cafe",            "Restaurants");
         put("diner",           "Restaurants");
         put("eatery",          "Restaurants");
-
-        // Food Delivery
-        put("doordash",        "Food Delivery");
-        put("ubereats",        "Food Delivery");
-        put("uber eats",       "Food Delivery");
-        put("grubhub",         "Food Delivery");
-        put("postmates",       "Food Delivery");
-        put("instacart",       "Food Delivery");
-        put("seamless",        "Food Delivery");
-        put("caviar",          "Food Delivery");
+        put("coffee",          "Restaurants");
+        put("espresso",        "Restaurants");
 
         // Groceries
         put("whole foods",     "Groceries");
@@ -82,11 +83,10 @@ public class CategorizationService {
         put("grocery",         "Groceries");
         put("supermarket",     "Groceries");
 
-        // Transport
-        put("uber",            "Transport");
+        // Transport (uber before ubereats to avoid conflict — ubereats matched above)
         put("lyft",            "Transport");
+        put("uber",            "Transport");
         put("metro",           "Transport");
-        put("subway transit",  "Transport");
         put("mta",             "Transport");
         put("transit",         "Transport");
         put("parking",         "Transport");
@@ -98,10 +98,10 @@ public class CategorizationService {
         put("amtrak",          "Transport");
         put("greyhound",       "Transport");
 
-        // Gas
+        // Gas (fixed: "bp" without trailing space, matched as whole word via normalization)
         put("shell",           "Gas");
         put("exxon",           "Gas");
-        put("bp ",             "Gas");
+        put("bp",              "Gas");
         put("chevron",         "Gas");
         put("mobil",           "Gas");
         put("sunoco",          "Gas");
@@ -150,7 +150,7 @@ public class CategorizationService {
         put("ticketmaster",    "Entertainment");
         put("stubhub",         "Entertainment");
 
-        // Travel / Airlines
+        // Travel
         put("airlines",        "Travel");
         put("united",          "Travel");
         put("delta",           "Travel");
@@ -167,7 +167,7 @@ public class CategorizationService {
         put("hyatt",           "Travel");
         put("holiday inn",     "Travel");
 
-        // Health / Pharmacy
+        // Health
         put("cvs",             "Health");
         put("walgreens",       "Health");
         put("rite aid",        "Health");
@@ -177,7 +177,6 @@ public class CategorizationService {
         put("hospital",        "Health");
         put("dental",          "Health");
         put("vision",          "Health");
-        put("dr ",             "Health");
 
         // Fitness
         put("gym",             "Fitness");
@@ -188,7 +187,7 @@ public class CategorizationService {
         put("yoga",            "Fitness");
         put("fitness",         "Fitness");
 
-        // Utilities / Bills
+        // Utilities
         put("at&t",            "Utilities");
         put("verizon",         "Utilities");
         put("t-mobile",        "Utilities");
@@ -196,80 +195,131 @@ public class CategorizationService {
         put("xfinity",         "Utilities");
         put("spectrum",        "Utilities");
         put("electric",        "Utilities");
-        put("water",           "Utilities");
         put("internet",        "Utilities");
         put("utility",         "Utilities");
         put("insurance",       "Utilities");
-
-        // Coffee (after restaurants to not overlap)
-        put("starbucks reserve","Restaurants");
-        put("coffee",          "Restaurants");
-        put("espresso",        "Restaurants");
     }};
 
     /**
-     * Categorizes all transactions for a given user.
-     * Overwrites existing category if a keyword match is found.
-     * Called automatically after every Teller sync.
+     * Categorizes uncategorized transactions for a user.
+     *
+     * Pass 1 — keyword rules: fast, free, handles well-known merchants.
+     * Pass 2 — LLM (Claude Haiku): handles everything else in a single batch call.
+     *
+     * IMPORTANT: only transactions with category == null are touched.
+     * Manual user categorizations (category != null) are never overwritten.
+     *
+     * @return number of transactions categorized
      */
     @Transactional
     public int categorizeForUser(Long userId) {
-        List<Transaction> transactions = transactionRepository.findByUserId(userId);
-        List<Category> userCategories  = categoryRepository.findByUserId(userId);
+        List<Transaction> allTransactions  = transactionRepository.findByUserId(userId);
+        List<Category>    userCategories   = categoryRepository.findByUserId(userId);
 
         if (userCategories.isEmpty()) {
-            log.info("No categories found for user {} — skipping categorization", userId);
+            log.info("No categories for user {} — skipping categorization", userId);
             return 0;
         }
 
-        // Build a lookup: canonical name (lowercase) → Category entity
-        Map<String, Category> categoryLookup = new HashMap<>();
-        for (Category cat : userCategories) {
-            categoryLookup.put(cat.getName().toLowerCase(), cat);
+        // Only process uncategorized transactions — respect manual assignments
+        List<Transaction> uncategorized = allTransactions.stream()
+                .filter(tx -> tx.getCategory() == null)
+                .filter(tx -> tx.getMerchantName() != null)
+                .collect(Collectors.toList());
+
+        if (uncategorized.isEmpty()) {
+            log.debug("No uncategorized transactions for user {}", userId);
+            return 0;
         }
 
-        int matched = 0;
-        for (Transaction tx : transactions) {
-            if (tx.getMerchantName() == null) continue;
+        Map<String, Category> categoryLookup = buildCategoryLookup(userCategories);
+        List<Transaction> toSave = new ArrayList<>();
 
-            String merchant = tx.getMerchantName().toLowerCase();
-            Category found  = findCategory(merchant, categoryLookup);
+        // ── Pass 1: keyword rules ─────────────────────────────────────────────
+        List<Transaction> stillUncategorized = new ArrayList<>();
 
-            if (found != null && !found.equals(tx.getCategory())) {
+        for (Transaction tx : uncategorized) {
+            String normalized = normalizeMerchant(tx.getMerchantName());
+            Category found = findByKeyword(normalized, categoryLookup);
+            if (found != null) {
                 tx.setCategory(found);
-                matched++;
+                toSave.add(tx);
+            } else {
+                stillUncategorized.add(tx);
             }
         }
 
-        if (matched > 0) {
-            transactionRepository.saveAll(transactions);
-            log.info("Auto-categorized {} transactions for user {}", matched, userId);
+        log.info("Keyword pass: categorized {}/{} transactions for user {}",
+                toSave.size(), uncategorized.size(), userId);
+
+        // ── Pass 2: LLM for remaining ─────────────────────────────────────────
+        if (!stillUncategorized.isEmpty() && llmService.isEnabled()) {
+            Map<Long, Category> llmResults = llmService.categorize(stillUncategorized, userCategories);
+
+            for (Transaction tx : stillUncategorized) {
+                Category cat = llmResults.get(tx.getId());
+                if (cat != null) {
+                    tx.setCategory(cat);
+                    toSave.add(tx);
+                }
+            }
+
+            log.info("LLM pass: categorized {}/{} remaining transactions for user {}",
+                    llmResults.size(), stillUncategorized.size(), userId);
         }
 
-        return matched;
+        if (!toSave.isEmpty()) {
+            transactionRepository.saveAll(toSave);
+        }
+
+        log.info("Total categorized: {}/{} for user {}", toSave.size(), uncategorized.size(), userId);
+        return toSave.size();
     }
 
     /**
-     * Finds the best matching category for a merchant name.
-     * Tries exact keyword rules first, then falls back to direct category name match.
+     * Strips common Teller raw-string prefixes and noise before keyword matching.
+     * e.g. "DD *DOORDASH WEGMANS" → "doordash wegmans"
+     *      "AMAZON MKTPL*BE7US64Q1 A" → "amazon"
+     *      "SQ *BLUE BOTTLE COFFEE" → "blue bottle coffee"
      */
-    private Category findCategory(String merchant, Map<String, Category> categoryLookup) {
-        // 1. Try keyword rules
+    private String normalizeMerchant(String raw) {
+        String s = raw.toLowerCase();
+
+        // Strip common prefixes
+        s = s.replaceAll("^(dd \\*|sq \\*|tst\\* |pp\\*|paypal \\*|amzn\\*|checkcard \\d+ )", "");
+
+        // Strip everything after * (Teller often appends reference codes after *)
+        int star = s.indexOf('*');
+        if (star > 0) s = s.substring(0, star);
+
+        // Strip trailing reference numbers (e.g. " 866-712-7753", " #12345")
+        s = s.replaceAll("\\s+[#\\d][\\d\\-]{4,}.*$", "");
+
+        return s.trim();
+    }
+
+    private Category findByKeyword(String normalizedMerchant, Map<String, Category> categoryLookup) {
+        // 1. Keyword rules
         for (Map.Entry<String, String> rule : KEYWORD_RULES.entrySet()) {
-            if (merchant.contains(rule.getKey())) {
+            if (normalizedMerchant.contains(rule.getKey())) {
                 Category cat = categoryLookup.get(rule.getValue().toLowerCase());
                 if (cat != null) return cat;
             }
         }
-
-        // 2. Fallback: check if merchant name directly contains a category name
+        // 2. Direct category name match
         for (Map.Entry<String, Category> entry : categoryLookup.entrySet()) {
-            if (merchant.contains(entry.getKey())) {
+            if (normalizedMerchant.contains(entry.getKey())) {
                 return entry.getValue();
             }
         }
-
         return null;
     }
-}
 
+    private Map<String, Category> buildCategoryLookup(List<Category> categories) {
+        Map<String, Category> lookup = new HashMap<>();
+        for (Category cat : categories) {
+            lookup.put(cat.getName().toLowerCase().trim(), cat);
+        }
+        return lookup;
+    }
+}
