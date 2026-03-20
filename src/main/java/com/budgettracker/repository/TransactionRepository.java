@@ -15,11 +15,18 @@ import java.util.Set;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    List<Transaction> findByUserId(Long userId);
+    // JOIN FETCH category on all list queries so mapToResponse() can access
+    // category.getName() without a live Hibernate session (open-in-view=false).
 
-    List<Transaction> findByUserIdOrderByDateDesc(Long userId);
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category WHERE t.user.id = :userId ORDER BY t.date DESC")
+    List<Transaction> findByUserId(@Param("userId") Long userId);
 
-    List<Transaction> findByUserIdAndCategoryId(Long userId, Long categoryId);
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category WHERE t.user.id = :userId ORDER BY t.date DESC")
+    List<Transaction> findByUserIdOrderByDateDesc(@Param("userId") Long userId);
+
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId AND t.category.id = :categoryId")
+    List<Transaction> findByUserIdAndCategoryId(@Param("userId") Long userId, @Param("categoryId") Long categoryId);
 
     Optional<Transaction> findByTellerTransactionId(String tellerTransactionId);
 
@@ -35,7 +42,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "AND t.tellerTransactionId IS NOT NULL")
     Set<String> findExistingTellerTransactionIds(@Param("enrollmentId") Long enrollmentId);
 
-    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId " +
             "AND t.date BETWEEN :startDate AND :endDate " +
             "ORDER BY t.date DESC")
     List<Transaction> findByUserIdAndDateRange(
@@ -44,7 +52,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDate endDate
     );
 
-    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId " +
             "AND t.category.id = :categoryId " +
             "AND t.date BETWEEN :startDate AND :endDate")
     List<Transaction> findByUserIdAndCategoryIdAndDateRange(
@@ -83,15 +92,20 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("endDate") LocalDate endDate
     );
 
-    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
-            "AND t.pending = true")
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId AND t.pending = true")
     List<Transaction> findPendingTransactionsByUserId(@Param("userId") Long userId);
 
-    List<Transaction> findByUserIdAndAccountType(Long userId, String accountType);
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId AND t.accountType = :accountType")
+    List<Transaction> findByUserIdAndAccountType(@Param("userId") Long userId, @Param("accountType") String accountType);
 
-    List<Transaction> findByUserIdAndAccountSubtype(Long userId, String accountSubtype);
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId AND t.accountSubtype = :accountSubtype")
+    List<Transaction> findByUserIdAndAccountSubtype(@Param("userId") Long userId, @Param("accountSubtype") String accountSubtype);
 
-    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId " +
             "AND (CAST(:accountType AS string) IS NULL OR t.accountType = :accountType) " +
             "AND (CAST(:accountSubtype AS string) IS NULL OR t.accountSubtype = :accountSubtype) " +
             "ORDER BY t.date DESC")
@@ -101,12 +115,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("accountSubtype") String accountSubtype
     );
 
-    /**
-     * Unified filter query — all params nullable, any combination works.
-     * Replaces the old separate methods that the controller's if/else chain
-     * called exclusively, making filters mutually exclusive by accident.
-     */
-    @Query("SELECT t FROM Transaction t WHERE t.user.id = :userId " +
+    @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
+            "WHERE t.user.id = :userId " +
             "AND (CAST(:startDate AS date) IS NULL OR t.date >= :startDate) " +
             "AND (CAST(:endDate AS date) IS NULL OR t.date <= :endDate) " +
             "AND (CAST(:categoryId AS long) IS NULL OR t.category.id = :categoryId) " +

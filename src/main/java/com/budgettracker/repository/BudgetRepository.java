@@ -14,11 +14,16 @@ import java.util.Optional;
 @Repository
 public interface BudgetRepository extends JpaRepository<Budget, Long> {
 
-    List<Budget> findByUserId(Long userId);
+    // JOIN FETCH category so it's always loaded in the same query.
+    // Without this, accessing budget.getCategory().getName() outside a Hibernate
+    // session (open-in-view=false) throws LazyInitializationException.
+    @Query("SELECT b FROM Budget b JOIN FETCH b.category WHERE b.user.id = :userId")
+    List<Budget> findByUserId(@Param("userId") Long userId);
 
-    List<Budget> findByUserIdAndPeriod(Long userId, BudgetPeriod period);
+    @Query("SELECT b FROM Budget b JOIN FETCH b.category WHERE b.user.id = :userId AND b.period = :period")
+    List<Budget> findByUserIdAndPeriod(@Param("userId") Long userId, @Param("period") BudgetPeriod period);
 
-    // Used in BudgetService.createBudget() to check for duplicates
+    // Used in BudgetService.createBudget() to check for duplicates — no category traversal needed
     Optional<Budget> findByUserIdAndCategoryIdAndPeriodAndStartDate(
             Long userId,
             Long categoryId,
@@ -26,8 +31,8 @@ public interface BudgetRepository extends JpaRepository<Budget, Long> {
             LocalDate startDate
     );
 
-    // Used in BudgetService.getActiveBudgets() and BudgetService.getBudgetSummary()
-    @Query("SELECT b FROM Budget b WHERE b.user.id = :userId " +
+    // Used in BudgetService.getActiveBudgets() and getBudgetSummary()
+    @Query("SELECT b FROM Budget b JOIN FETCH b.category WHERE b.user.id = :userId " +
             "AND b.startDate <= :date AND b.endDate >= :date")
     List<Budget> findActiveBudgetsByUserIdAndDate(
             @Param("userId") Long userId,
