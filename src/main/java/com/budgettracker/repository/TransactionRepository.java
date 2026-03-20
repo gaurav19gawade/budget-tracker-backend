@@ -58,7 +58,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.user.id = :userId " +
             "AND t.category.id = :categoryId " +
-            "AND t.date BETWEEN :startDate AND :endDate")
+            "AND t.date BETWEEN :startDate AND :endDate " +
+            "AND (t.transactionType IS NULL OR t.transactionType <> 'credit') " +
+            "AND t.amount > 0")
     BigDecimal sumAmountByUserIdAndCategoryIdAndDateRange(
             @Param("userId") Long userId,
             @Param("categoryId") Long categoryId,
@@ -71,6 +73,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "WHERE t.user.id = :userId " +
             "AND t.category.id IN :categoryIds " +
             "AND t.date BETWEEN :startDate AND :endDate " +
+            "AND (t.transactionType IS NULL OR t.transactionType <> 'credit') " +
+            "AND t.amount > 0 " +
             "GROUP BY t.category.id")
     List<Object[]> sumAmountGroupedByCategoryIds(
             @Param("userId") Long userId,

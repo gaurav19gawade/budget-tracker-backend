@@ -120,6 +120,10 @@ public class TellerService {
 
                 boolean pending = parseBoolean(t.get("pending"));
 
+                // Teller sends "type": "debit" (money out) or "credit" (money in, e.g. salary, refunds).
+                // Store it so analytics and budgets can exclude credits from spend calculations.
+                String transactionType = Objects.toString(t.get("type"), "debit").toLowerCase();
+
                 Transaction txn = Transaction.builder()
                         .user(enrollment.getUser())
                         .tellerEnrollment(enrollment)
@@ -129,10 +133,11 @@ public class TellerService {
                         .accountSubtype(accountSubtype)
                         .accountName(accountName)
                         .accountLastFour(accountLastFour)
-                        .amount(amount != null ? amount : BigDecimal.ZERO)
+                        .amount(amount != null ? amount.abs() : BigDecimal.ZERO)
                         .date(date)
                         .merchantName(merchant)
                         .description(description)
+                        .transactionType(transactionType)
                         .isManual(false)
                         .pending(pending)
                         .build();

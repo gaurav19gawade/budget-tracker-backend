@@ -26,16 +26,24 @@ public class AnalyticsService {
         List<Transaction> transactions = transactionRepository
                 .findByUserIdAndDateRange(userId, startDate, endDate);
 
-        BigDecimal totalSpent = transactions.stream()
+        // Only count debits (money out) as "spend".
+        // Credits include salary deposits, Zelle received, refunds, etc. —
+        // including them would inflate totals and pollute merchant/category breakdowns.
+        List<Transaction> debits = transactions.stream()
+                .filter(tx -> !"credit".equalsIgnoreCase(tx.getTransactionType()))
+                .filter(tx -> tx.getAmount().compareTo(BigDecimal.ZERO) > 0)
+                .toList();
+
+        BigDecimal totalSpent = debits.stream()
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return AnalyticsSummaryResponse.builder()
                 .totalSpent(totalSpent)
-                .totalTransactions(BigDecimal.valueOf(transactions.size()))
-                .byCategory(buildCategorySpend(transactions, totalSpent))
-                .byDay(buildDailySpend(transactions, startDate, endDate))
-                .topMerchants(buildTopMerchants(transactions))
+                .totalTransactions(BigDecimal.valueOf(debits.size()))
+                .byCategory(buildCategorySpend(debits, totalSpent))
+                .byDay(buildDailySpend(debits, startDate, endDate))
+                .topMerchants(buildTopMerchants(debits))
                 .build();
     }
 

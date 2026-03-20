@@ -91,6 +91,13 @@ public class Transaction {
     @Column(nullable = false)
     private Boolean pending = false;
 
+    /**
+     * Teller transaction type: "debit" (money out) or "credit" (money in).
+     * Null for manually-entered transactions which are always treated as debits.
+     */
+    @Column(name = "transaction_type", length = 10)
+    private String transactionType;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
