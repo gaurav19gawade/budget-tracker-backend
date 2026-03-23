@@ -30,8 +30,11 @@ public class TransactionResponse {
     private String tellerAccountId;
     private String accountType;        // "credit", "depository"
     private String accountSubtype;     // "credit_card", "checking", "savings"
-    private String accountName;        // "Freedom Unlimited", "TOTAL CHECKING"
-    private String accountLastFour;    // Last 4 digits
+    private String accountName;
+    private String accountLastFour;
+
+    // "debit" = money out, "credit" = money in (salary, transfers received, refunds)
+    private String transactionType;
 
     private LocalDateTime createdAt;
 }

@@ -7,20 +7,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/**
- * Runs once after Spring Boot finishes startup (ApplicationReadyEvent).
- *
- * 1. Warms the HikariCP connection pool so the first real request doesn't
- *    pay the pool-init cost (especially relevant on Render where the JVM
- *    starts cold after inactivity).
- *
- * 2. Backfills transaction_type for rows that were synced before the column
- *    existed (those rows have transaction_type = NULL). Uses description/merchant
- *    keyword patterns to identify credits (salary, payroll, deposits, Zelle
- *    received, etc.) and marks everything else as 'debit'.
- *
- *    This is idempotent — safe to run on every startup, only touches NULL rows.
- */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -35,24 +21,6 @@ public class WarmUpListener {
         backfillTransactionTypes();
     }
 
-    private void fixNegativeAmounts() {
-        try {
-            // Some transactions were synced before amount.abs() was applied in TellerService.
-            // Fix any negative amounts by flipping their sign — amounts should always be positive,
-            // with transactionType distinguishing debits from credits.
-            int fixed = jdbcTemplate.update("""
-                UPDATE transactions
-                SET amount = amount * -1
-                WHERE amount < 0
-                """);
-            if (fixed > 0) {
-                log.info("Fixed {} transactions with negative amounts", fixed);
-            }
-        } catch (Exception e) {
-            log.warn("Negative amount fix failed (non-fatal): {}", e.getMessage());
-        }
-    }
-
     private void warmUpPool() {
         try {
             long start = System.currentTimeMillis();
@@ -63,60 +31,91 @@ public class WarmUpListener {
         }
     }
 
+    private void fixNegativeAmounts() {
+        try {
+            int fixed = jdbcTemplate.update("""
+                UPDATE transactions
+                SET amount = amount * -1
+                WHERE amount < 0
+                """);
+            if (fixed > 0) log.info("Fixed {} transactions with negative amounts", fixed);
+        } catch (Exception e) {
+            log.warn("Negative amount fix failed (non-fatal): {}", e.getMessage());
+        }
+    }
+
     /**
-     * Backfills transaction_type for existing NULL rows.
-     * Runs two UPDATE statements:
-     *   1. Mark known credit patterns as 'credit'
-     *   2. Mark everything still NULL as 'debit'
+     * Backfills/corrects transaction_type for all bank-synced rows.
      *
-     * Credit patterns are matched case-insensitively against merchant_name
-     * and description. Covers the common cases from payroll processors,
-     * Zelle/ACH transfers in, and direct deposits.
+     * Re-evaluates ALL non-manual rows every startup (not just NULLs) because
+     * a previous deploy may have already stamped everything as 'debit' before
+     * the keyword patterns were complete. Manual transactions are always debits.
+     *
+     * Credit detection uses two independent signals, either is sufficient:
+     *   1. Keyword match on merchant_name / description (payroll, Zelle from, deposit, etc.)
+     *   2. Teller sandbox convention: credits were originally negative amounts.
+     *      After fixNegativeAmounts() flips them, we've lost the sign — but the
+     *      description field from Teller still contains the raw ACH description
+     *      which reliably identifies the transaction type.
      */
     private void backfillTransactionTypes() {
         try {
-            // Step 1: mark credits by keyword patterns
+            // Mark credits on ALL bank transactions (re-evaluate, not just NULL).
+            // Keyword list covers: GE Healthcare payroll, Robinhood dividends/transfers,
+            // Zelle received, direct deposits, refunds, and generic ACH credit patterns.
             int credits = jdbcTemplate.update("""
                 UPDATE transactions
                 SET transaction_type = 'credit'
-                WHERE transaction_type IS NULL
+                WHERE is_manual = false
                   AND (
-                    -- Payroll / salary deposits
+                    -- Payroll / salary
                     LOWER(merchant_name) LIKE '%salary%'
                     OR LOWER(merchant_name) LIKE '%payroll%'
                     OR LOWER(merchant_name) LIKE '%reg.salary%'
                     OR LOWER(merchant_name) LIKE '%payroll ppd%'
-                    OR LOWER(merchant_name) LIKE '%orig co name%'
-                    -- Direct deposit / generic deposit
+                    OR LOWER(description)  LIKE '%payroll%'
+                    OR LOWER(description)  LIKE '%salary%'
+                    -- "ORIG CO NAME:" prefix = ACH originator header, almost always a credit
+                    OR LOWER(merchant_name) LIKE 'orig co name:%'
+                    OR LOWER(description)   LIKE 'orig co name:%'
+                    -- Direct deposit
                     OR LOWER(merchant_name) LIKE '%direct deposit%'
+                    OR LOWER(merchant_name) LIKE '%directdep%'
                     OR LOWER(merchant_name) = 'deposit'
-                    OR LOWER(description) LIKE '%direct deposit%'
-                    OR LOWER(description) LIKE '%payroll%'
-                    OR LOWER(description) LIKE '%salary%'
-                    -- Zelle / P2P received
+                    OR LOWER(description)  LIKE '%direct deposit%'
+                    OR LOWER(description)  LIKE '%ach credit%'
+                    OR LOWER(description)  LIKE '%ach dep%'
+                    -- Zelle / P2P received (not "Zelle payment to" which is a debit)
                     OR LOWER(merchant_name) LIKE '%zelle payment from%'
-                    OR LOWER(description) LIKE '%zelle payment from%'
-                    -- ACH credit indicators
-                    OR LOWER(description) LIKE '%ach credit%'
-                    OR LOWER(description) LIKE '%ach dep%'
+                    OR LOWER(description)   LIKE '%zelle payment from%'
+                    -- Brokerage / investment credits (Robinhood, Fidelity, etc.)
+                    OR LOWER(merchant_name) LIKE '%robinhood%'
+                    OR LOWER(merchant_name) LIKE '%dividend%'
+                    OR LOWER(description)   LIKE '%dividend%'
                     -- Refunds
                     OR LOWER(merchant_name) LIKE '%refund%'
-                    OR LOWER(description) LIKE '%refund%'
+                    OR LOWER(description)   LIKE '%refund%'
+                    OR LOWER(description)   LIKE '%reversal%'
                   )
                 """);
 
-            // Step 2: everything still NULL is a debit
+            // Everything else that's bank-synced is a debit (spending)
             int debits = jdbcTemplate.update("""
                 UPDATE transactions
                 SET transaction_type = 'debit'
-                WHERE transaction_type IS NULL
+                WHERE is_manual = false
+                  AND (transaction_type IS NULL OR transaction_type <> 'credit')
                 """);
 
-            if (credits > 0 || debits > 0) {
-                log.info("Backfilled transaction_type: {} credits, {} debits", credits, debits);
-            } else {
-                log.debug("transaction_type backfill: nothing to update (all rows already typed)");
-            }
+            // Manual transactions are always debits
+            jdbcTemplate.update("""
+                UPDATE transactions
+                SET transaction_type = 'debit'
+                WHERE is_manual = true
+                  AND transaction_type IS NULL
+                """);
+
+            log.info("transaction_type backfill: {} credits, {} debits re-evaluated", credits, debits);
         } catch (Exception e) {
             log.warn("transaction_type backfill failed (non-fatal): {}", e.getMessage());
         }

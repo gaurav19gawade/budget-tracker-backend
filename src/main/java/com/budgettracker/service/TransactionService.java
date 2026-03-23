@@ -201,6 +201,7 @@ public class TransactionService {
                 .accountSubtype(transaction.getAccountSubtype())
                 .accountName(transaction.getAccountName())
                 .accountLastFour(transaction.getAccountLastFour())
+                .transactionType(transaction.getTransactionType())
                 .createdAt(transaction.getCreatedAt())
                 .build();
     }
