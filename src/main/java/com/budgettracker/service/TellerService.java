@@ -1,5 +1,6 @@
 package com.budgettracker.service;
 
+import com.budgettracker.dto.SyncResult;
 import com.budgettracker.dto.TellerAccountResponse;
 import com.budgettracker.model.TellerEnrollment;
 import com.budgettracker.model.Transaction;
@@ -72,7 +73,7 @@ public class TellerService {
      * Teller returns accounts list for the access token, then transactions per account. :contentReference[oaicite:7]{index=7}
      */
     @Transactional
-    public void syncTransactions(Long tellerEnrollmentDbId) {
+    public SyncResult syncTransactions(Long tellerEnrollmentDbId) {
         TellerEnrollment enrollment = tellerEnrollmentRepository.findById(tellerEnrollmentDbId)
                 .orElseThrow(() -> new RuntimeException("Teller enrollment not found"));
 
@@ -102,6 +103,17 @@ public class TellerService {
                 if (tellerTxnId == null) continue;
 
                 if (transactionRepository.existsByTellerTransactionId(tellerTxnId)) {
+                    // Row already exists. Always overwrite transactionType with Teller's authoritative
+                    // value — this corrects rows that were guessed by keyword backfill or stamped
+                    // before the column existed. Teller is the ground truth.
+                    String rawType = Objects.toString(t.get("type"), "debit").toLowerCase();
+                    transactionRepository.findByTellerTransactionId(tellerTxnId)
+                            .filter(existing -> !rawType.equals(existing.getTransactionType()))
+                            .ifPresent(existing -> {
+                                existing.setTransactionType(rawType);
+                                transactionRepository.save(existing);
+                                log.debug("Corrected transactionType for {} to {}", tellerTxnId, rawType);
+                            });
                     continue;
                 }
 
@@ -152,13 +164,20 @@ public class TellerService {
 
         // Run categorization after every sync — keyword pass first, LLM fallback for remainder.
         // Only touches transactions with category == null (manual assignments preserved).
+        int categorized = 0;
         if (saved > 0) {
-            int categorized = categorizationService.categorizeForUser(enrollment.getUser().getId());
+            categorized = categorizationService.categorizeForUser(enrollment.getUser().getId());
             log.info("Auto-categorized {} transactions for enrollment {}", categorized, tellerEnrollmentDbId);
         }
 
         log.info("Synced Teller enrollment {} - accounts: {}, new txns saved: {}",
                 tellerEnrollmentDbId, accounts.size(), saved);
+
+        return SyncResult.builder()
+                .accountsFound(accounts.size())
+                .transactionsSynced(saved)
+                .transactionsCategorized(categorized)
+                .build();
     }
 
     public List<TellerAccountResponse> getConnectedAccounts(Long userId) {

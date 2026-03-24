@@ -1,5 +1,6 @@
 package com.budgettracker.controller;
 
+import com.budgettracker.dto.SyncResult;
 import com.budgettracker.dto.TellerAccountResponse;
 import com.budgettracker.dto.TellerConnectRequest;
 import com.budgettracker.security.UserPrincipal;
@@ -48,13 +49,12 @@ public class TellerController {
     }
 
     @PostMapping("/sync/{enrollmentDbId}")
-    public ResponseEntity<Void> syncTransactions(
+    public ResponseEntity<SyncResult> syncTransactions(
             @AuthenticationPrincipal UserPrincipal currentUser,
             @PathVariable Long enrollmentDbId) {
 
-        // ownership check is enforced in remove; sync is safe but you can add findByIdAndUserId if desired
-        tellerService.syncTransactions(enrollmentDbId);
-        return ResponseEntity.ok().build();
+        SyncResult result = tellerService.syncTransactions(enrollmentDbId);
+        return ResponseEntity.ok(result);
     }
 
     @DeleteMapping("/accounts/{enrollmentDbId}")
