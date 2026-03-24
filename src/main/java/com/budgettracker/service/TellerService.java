@@ -73,7 +73,8 @@ public class TellerService {
      * Sync transactions for all accounts under this enrollment.
      * Teller returns accounts list for the access token, then transactions per account. :contentReference[oaicite:7]{index=7}
      */
-    @Transactional
+    // Note: NOT @Transactional — each transaction.save() must commit immediately
+    // so existsByTellerTransactionId() sees them when a second enrollment syncs the same account.
     public SyncResult syncTransactions(Long tellerEnrollmentDbId) {
         TellerEnrollment enrollment = tellerEnrollmentRepository.findById(tellerEnrollmentDbId)
                 .orElseThrow(() -> new RuntimeException("Teller enrollment not found"));
