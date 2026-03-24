@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -95,7 +96,20 @@ public class TellerService {
             String accountName = Objects.toString(account.get("name"), "Unknown Account");
             String accountLastFour = Objects.toString(account.get("last_four"), null);
 
-            List<Map<String, Object>> txns = listTransactions(enrollment.getAccessToken(), accountId);
+            List<Map<String, Object>> txns;
+            try {
+                txns = listTransactions(enrollment.getAccessToken(), accountId);
+            } catch (HttpClientErrorException e) {
+                // 410 Gone = account closed at the bank; 403 = access revoked.
+                // Log and skip this account — don't fail the whole enrollment sync.
+                log.warn("Skipping account {} ({}): {} — {}",
+                        accountId, accountName, e.getStatusCode(), e.getMessage());
+                continue;
+            } catch (Exception e) {
+                log.warn("Unexpected error fetching transactions for account {} ({}): {}",
+                        accountId, accountName, e.getMessage());
+                continue;
+            }
 
             for (Map<String, Object> t : txns) {
                 // Teller transaction id field is "id" in their resources
