@@ -113,7 +113,7 @@ public class TellerService {
                             .ifPresent(existing -> {
                                 existing.setTransactionType(normalizedType);
                                 transactionRepository.save(existing);
-                                log.debug("Corrected transactionType for {} to {}", tellerTxnId, rawType);
+                                log.debug("Corrected transactionType for {} to {}", tellerTxnId, normalizedType);
                             });
                     continue;
                 }
