@@ -106,11 +106,12 @@ public class TellerService {
                     // Row already exists. Always overwrite transactionType with Teller's authoritative
                     // value — this corrects rows that were guessed by keyword backfill or stamped
                     // before the column existed. Teller is the ground truth.
-                    String rawType = Objects.toString(t.get("type"), "debit").toLowerCase();
+                    String rawTypeExisting = Objects.toString(t.get("type"), "debit").toLowerCase();
+                    String normalizedType = rawTypeExisting.equals("credit") ? "credit" : "debit";
                     transactionRepository.findByTellerTransactionId(tellerTxnId)
-                            .filter(existing -> !rawType.equals(existing.getTransactionType()))
+                            .filter(existing -> !normalizedType.equals(existing.getTransactionType()))
                             .ifPresent(existing -> {
-                                existing.setTransactionType(rawType);
+                                existing.setTransactionType(normalizedType);
                                 transactionRepository.save(existing);
                                 log.debug("Corrected transactionType for {} to {}", tellerTxnId, rawType);
                             });
@@ -132,9 +133,11 @@ public class TellerService {
 
                 boolean pending = parseBoolean(t.get("pending"));
 
-                // Teller sends "type": "debit" (money out) or "credit" (money in, e.g. salary, refunds).
-                // Store it so analytics and budgets can exclude credits from spend calculations.
-                String transactionType = Objects.toString(t.get("type"), "debit").toLowerCase();
+                // Teller sends a "type" field. Known values include "debit", "credit",
+                // "electronic", "ach", "wire", "check", etc. We normalize to just
+                // "debit" or "credit" — everything that isn't explicitly a credit is a debit.
+                String rawType = Objects.toString(t.get("type"), "debit").toLowerCase();
+                String transactionType = rawType.equals("credit") ? "credit" : "debit";
 
                 Transaction txn = Transaction.builder()
                         .user(enrollment.getUser())

@@ -95,7 +95,12 @@ public class Transaction {
      * Teller transaction type: "debit" (money out) or "credit" (money in).
      * Null for manually-entered transactions which are always treated as debits.
      */
-    @Column(name = "transaction_type", length = 10)
+    /**
+     * Normalized transaction direction: "debit" (money out) or "credit" (money in).
+     * Teller may send longer type strings — we normalize in TellerService.
+     * VARCHAR(20) gives a safe margin over the 6-char max we expect.
+     */
+    @Column(name = "transaction_type", length = 50)
     private String transactionType;
 
     @CreationTimestamp
