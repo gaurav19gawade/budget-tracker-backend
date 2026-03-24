@@ -13,10 +13,14 @@ import org.springframework.stereotype.Component;
  * 1. Warms the HikariCP connection pool.
  * 2. Fixes any negative amounts from before amount.abs() was added.
  * 3. Stamps NULL transaction_type rows as 'debit' as a safe default.
+ *    ONLY touches rows where transaction_type IS NULL — never overwrites
+ *    an already-set value (credit or debit).
  * 4. Removes stale duplicate Teller enrollments (same user + institution).
  *    Keeps the newest enrollment per user+institution, deletes older ones
  *    along with their orphaned transactions. This prevents duplicate key
  *    errors when two enrollments try to insert the same teller_transaction_id.
+ *    After deletion, the next scheduled sync re-inserts those transactions
+ *    with the correct type derived from Teller's amount sign.
  */
 @Component
 @RequiredArgsConstructor

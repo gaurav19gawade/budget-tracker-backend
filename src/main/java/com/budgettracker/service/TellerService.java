@@ -73,25 +73,27 @@ public class TellerService {
      * Sync transactions for all accounts under this enrollment.
      * Teller returns accounts list for the access token, then transactions per account. :contentReference[oaicite:7]{index=7}
      */
-    // Note: NOT @Transactional — each transaction.save() must commit immediately
-    // so existsByTellerTransactionId() sees them when a second enrollment syncs the same account.
+    // Note: NOT @Transactional — saveAll() commits atomically per enrollment, which is fine
+    // because removeStaleEnrollments() ensures at most one enrollment per user+institution.
     public SyncResult syncTransactions(Long tellerEnrollmentDbId) {
         TellerEnrollment enrollment = tellerEnrollmentRepository.findById(tellerEnrollmentDbId)
                 .orElseThrow(() -> new RuntimeException("Teller enrollment not found"));
 
         List<Map<String, Object>> accounts = listAccounts(enrollment.getAccessToken());
 
-        // last 30 days like your Plaid logic
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(30);
 
-        int saved = 0;
+        // Pre-load all teller IDs already stored for this enrollment in one query.
+        // Avoids an existsByTellerTransactionId() round-trip for every row in the loop.
+        Set<String> knownIds = transactionRepository.findExistingTellerTransactionIds(tellerEnrollmentDbId);
+
+        List<Transaction> toInsert = new ArrayList<>();
 
         for (Map<String, Object> account : accounts) {
             String accountId = Objects.toString(account.get("id"), null);
             if (accountId == null) continue;
 
-            // Extract account information from Teller API
             String accountType = Objects.toString(account.get("type"), null);
             String accountSubtype = Objects.toString(account.get("subtype"), null);
             String accountName = Objects.toString(account.get("name"), "Unknown Account");
@@ -102,7 +104,7 @@ public class TellerService {
                 txns = listTransactions(enrollment.getAccessToken(), accountId);
             } catch (HttpClientErrorException e) {
                 // 410 Gone = account closed at the bank; 403 = access revoked.
-                // Log and skip this account — don't fail the whole enrollment sync.
+                // Log and skip this account — don’t fail the whole enrollment sync.
                 log.warn("Skipping account {} ({}): {} — {}",
                         accountId, accountName, e.getStatusCode(), e.getMessage());
                 continue;
@@ -113,32 +115,31 @@ public class TellerService {
             }
 
             for (Map<String, Object> t : txns) {
-                // Teller transaction id field is "id" in their resources
                 String tellerTxnId = Objects.toString(t.get("id"), null);
                 if (tellerTxnId == null) continue;
 
-                if (transactionRepository.existsByTellerTransactionId(tellerTxnId)) {
-                    // Row already exists. Always overwrite transactionType with Teller's authoritative
-                    // value — this corrects rows that were guessed by keyword backfill or stamped
-                    // before the column existed. Teller is the ground truth.
-                    String rawTypeExisting = Objects.toString(t.get("type"), "debit").toLowerCase();
-                    String normalizedType = rawTypeExisting.equals("credit") ? "credit" : "debit";
+                // Derive direction from amount sign — this is the ground truth for credit vs debit.
+                // Teller’s "type" field encodes payment method (ach, wire, check, card_payment, etc.),
+                // NOT direction. A positive amount means money arrived (credit); negative means money left (debit).
+                BigDecimal rawAmount = parseAmount(t.get("amount"));
+                String transactionType = (rawAmount != null && rawAmount.compareTo(BigDecimal.ZERO) > 0)
+                        ? "credit" : "debit";
+
+                if (knownIds.contains(tellerTxnId)) {
+                    // Row already exists. Correct the stored type if it diverges from Teller’s value —
+                    // this repairs rows that were mis-classified by the old payment-method mapping.
                     transactionRepository.findByTellerTransactionId(tellerTxnId)
-                            .filter(existing -> !normalizedType.equals(existing.getTransactionType()))
+                            .filter(existing -> !transactionType.equals(existing.getTransactionType()))
                             .ifPresent(existing -> {
-                                existing.setTransactionType(normalizedType);
+                                existing.setTransactionType(transactionType);
                                 transactionRepository.save(existing);
-                                log.debug("Corrected transactionType for {} to {}", tellerTxnId, normalizedType);
+                                log.debug("Corrected transactionType for {} → {}", tellerTxnId, transactionType);
                             });
                     continue;
                 }
 
-                // Best-effort mapping (Teller’s schema differs from Plaid; you can refine later)
-                BigDecimal amount = parseAmount(t.get("amount"));
                 LocalDate date = parseDate(t.get("date"));
-                if (date == null || date.isBefore(startDate) || date.isAfter(endDate)) {
-                    continue;
-                }
+                if (date == null || date.isBefore(startDate) || date.isAfter(endDate)) continue;
 
                 String description = Objects.toString(t.get("description"), "");
                 String merchant = Objects.toString(t.get("merchant_name"), null);
@@ -148,13 +149,7 @@ public class TellerService {
 
                 boolean pending = parseBoolean(t.get("pending"));
 
-                // Teller sends a "type" field. Known values include "debit", "credit",
-                // "electronic", "ach", "wire", "check", etc. We normalize to just
-                // "debit" or "credit" — everything that isn't explicitly a credit is a debit.
-                String rawType = Objects.toString(t.get("type"), "debit").toLowerCase();
-                String transactionType = rawType.equals("credit") ? "credit" : "debit";
-
-                Transaction txn = Transaction.builder()
+                toInsert.add(Transaction.builder()
                         .user(enrollment.getUser())
                         .tellerEnrollment(enrollment)
                         .tellerTransactionId(tellerTxnId)
@@ -163,19 +158,22 @@ public class TellerService {
                         .accountSubtype(accountSubtype)
                         .accountName(accountName)
                         .accountLastFour(accountLastFour)
-                        .amount(amount != null ? amount.abs() : BigDecimal.ZERO)
+                        .amount(rawAmount != null ? rawAmount.abs() : BigDecimal.ZERO)
                         .date(date)
                         .merchantName(merchant)
                         .description(description)
                         .transactionType(transactionType)
                         .isManual(false)
                         .pending(pending)
-                        .build();
-
-                transactionRepository.save(txn);
-                saved++;
+                        .build());
             }
         }
+
+        // Batch insert — one round-trip instead of one per transaction.
+        if (!toInsert.isEmpty()) {
+            transactionRepository.saveAll(toInsert);
+        }
+        int saved = toInsert.size();
 
         enrollment.setLastSyncedAt(java.time.LocalDateTime.now());
         tellerEnrollmentRepository.save(enrollment);
