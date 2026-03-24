@@ -122,7 +122,8 @@ public class TellerService {
                 // Teller’s "type" field encodes payment method (ach, wire, check, card_payment, etc.),
                 // NOT direction. A positive amount means money arrived (credit); negative means money left (debit).
                 BigDecimal rawAmount = parseAmount(t.get("amount"));
-                String transactionType = (rawAmount != null && rawAmount.compareTo(BigDecimal.ZERO) > 0)
+                // Teller: NEGATIVE = credit (money IN), POSITIVE = debit (money OUT)
+                String transactionType = (rawAmount != null && rawAmount.compareTo(BigDecimal.ZERO) < 0)
                         ? "credit" : "debit";
 
                 if (knownIds.contains(tellerTxnId)) {

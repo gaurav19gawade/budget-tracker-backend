@@ -11,16 +11,21 @@ import org.springframework.stereotype.Component;
  * Runs once after Spring Boot finishes startup.
  *
  * 1. Warms the HikariCP connection pool.
- * 2. Fixes any negative amounts from before amount.abs() was added.
- * 3. Stamps NULL transaction_type rows as 'debit' as a safe default.
- *    ONLY touches rows where transaction_type IS NULL — never overwrites
- *    an already-set value (credit or debit).
- * 4. Removes stale duplicate Teller enrollments (same user + institution).
- *    Keeps the newest enrollment per user+institution, deletes older ones
- *    along with their orphaned transactions. This prevents duplicate key
- *    errors when two enrollments try to insert the same teller_transaction_id.
- *    After deletion, the next scheduled sync re-inserts those transactions
- *    with the correct type derived from Teller's amount sign.
+ * 2. Fixes any negative amounts (stored before amount.abs() was added).
+ * 3. Backfills transaction_type using Teller's original amount sign:
+ *      - Before .abs() was applied, Teller sent credits as NEGATIVE amounts.
+ *      - The fixNegativeAmounts() step flips them to positive.
+ *      - But first we check the ORIGINAL sign: if amount was negative before
+ *        flipping, Teller considered it a credit.
+ *
+ *    Since fixNegativeAmounts runs first and flips negatives, we can no longer
+ *    use amount sign directly. Instead we use a two-pass approach:
+ *      Pass 1: rows still negative (not yet fixed) → credit
+ *      Pass 2: rows that are null type and were positive after fix → debit
+ *
+ *    For rows that already have a non-null transactionType, we never overwrite.
+ *
+ * 4. Removes stale duplicate Teller enrollments, keeping the newest per user+institution.
  */
 @Component
 @RequiredArgsConstructor
@@ -32,8 +37,9 @@ public class WarmUpListener {
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
         warmUpPool();
+        backfillTransactionTypesFromAmountSign();
         fixNegativeAmounts();
-        stampNullTypes();
+        stampRemainingNullsAsDebit();
         removeStaleEnrollments();
     }
 
@@ -44,6 +50,36 @@ public class WarmUpListener {
             log.info("DB warm-up complete in {}ms", System.currentTimeMillis() - start);
         } catch (Exception e) {
             log.warn("DB warm-up failed (non-fatal): {}", e.getMessage());
+        }
+    }
+
+    /**
+     * MUST run BEFORE fixNegativeAmounts so we can still read the original sign.
+     *
+     * Teller's sign convention (before we applied abs()):
+     *   negative amount = credit (money IN  — salary, Zelle received, deposits)
+     *   positive amount = debit  (money OUT — purchases, payments)
+     *
+     * Any row still NULL that has a negative amount is a credit.
+     * Any row still NULL that has a positive amount is a debit.
+     * Rows with an existing non-null type are never touched.
+     */
+    private void backfillTransactionTypesFromAmountSign() {
+        try {
+            // Negative amount = Teller credit (money in) — mark before abs() flips it
+            int credits = jdbcTemplate.update(
+                    "UPDATE transactions " +
+                            "SET transaction_type = 'credit' " +
+                            "WHERE transaction_type IS NULL " +
+                            "  AND is_manual = false " +
+                            "  AND amount < 0"
+            );
+
+            if (credits > 0) {
+                log.info("Backfilled {} transactions as 'credit' from negative amount sign", credits);
+            }
+        } catch (Exception e) {
+            log.warn("backfillTransactionTypesFromAmountSign failed (non-fatal): {}", e.getMessage());
         }
     }
 
@@ -58,27 +94,21 @@ public class WarmUpListener {
         }
     }
 
-    private void stampNullTypes() {
+    /**
+     * Any remaining NULL after the credit backfill is a debit (positive amount = money out).
+     * Only touches NULLs — never overwrites an already-set value.
+     */
+    private void stampRemainingNullsAsDebit() {
         try {
             int stamped = jdbcTemplate.update(
                     "UPDATE transactions SET transaction_type = 'debit' WHERE transaction_type IS NULL"
             );
-            if (stamped > 0) log.info("Stamped {} NULL transaction_type rows as 'debit'", stamped);
+            if (stamped > 0) log.info("Stamped {} remaining NULL rows as 'debit'", stamped);
         } catch (Exception e) {
-            log.warn("stampNullTypes failed (non-fatal): {}", e.getMessage());
+            log.warn("stampRemainingNullsAsDebit failed (non-fatal): {}", e.getMessage());
         }
     }
 
-    /**
-     * Removes older duplicate Teller enrollments where the same user has
-     * multiple enrollments for the same institution. Keeps the highest ID
-     * (most recently created) and deletes the rest along with their transactions.
-     *
-     * Root cause: if a user connects Chase, disconnects, and reconnects, they
-     * get two enrollment rows. The scheduled sync runs both, and when enrollment
-     * 3 tries to insert transactions already saved by enrollment 5, it hits the
-     * unique constraint on teller_transaction_id.
-     */
     private void removeStaleEnrollments() {
         try {
             int txnsDeleted = jdbcTemplate.update(
@@ -92,7 +122,6 @@ public class WarmUpListener {
                             "  )" +
                             ")"
             );
-
             int enrollmentsDeleted = jdbcTemplate.update(
                     "DELETE FROM teller_enrollments te1" +
                             " WHERE EXISTS (" +
@@ -102,7 +131,6 @@ public class WarmUpListener {
                             "    AND te2.id > te1.id" +
                             " )"
             );
-
             if (enrollmentsDeleted > 0) {
                 log.info("Removed {} stale duplicate enrollments and {} orphaned transactions",
                         enrollmentsDeleted, txnsDeleted);
