@@ -82,13 +82,30 @@ public class BudgetService {
     }
 
     public List<BudgetResponse> getActiveBudgets(Long userId) {
-        List<Budget> budgets = budgetRepository.findActiveBudgetsByUserIdAndDate(userId, LocalDate.now());
-        return mapBudgetsToResponses(userId, budgets);
+        LocalDate today = LocalDate.now();
+        List<Budget> all = budgetRepository.findByUserId(userId);
+        List<Budget> active = all.stream()
+                .map(b -> applyCurrentPeriodWindow(b, today))
+                .filter(b -> !today.isBefore(b.getStartDate()) && !today.isAfter(b.getEndDate()))
+                .collect(java.util.stream.Collectors.toList());
+        return mapBudgetsToResponses(userId, active);
     }
 
     public BudgetSummaryResponse getBudgetSummary(Long userId) {
         LocalDate today = LocalDate.now();
-        List<Budget> activeBudgets = budgetRepository.findActiveBudgetsByUserIdAndDate(userId, today);
+
+        // First fetch all budgets (not just "active" by stored dates) so we can
+        // compute the current rolling period window for MONTHLY/WEEKLY budgets.
+        // A "MONTHLY" budget created Feb 23–Mar 23 should still be active on Mar 25
+        // — it just rolls to Mar 1–Mar 31 (current month).
+        List<Budget> allBudgets = budgetRepository.findByUserId(userId);
+
+        // For each budget, compute the effective current window based on period type.
+        // Replace startDate/endDate on a transient copy so the query uses today's window.
+        List<Budget> activeBudgets = allBudgets.stream()
+                .map(b -> applyCurrentPeriodWindow(b, today))
+                .filter(b -> !today.isBefore(b.getStartDate()) && !today.isAfter(b.getEndDate()))
+                .collect(java.util.stream.Collectors.toList());
 
         if (activeBudgets.isEmpty()) {
             return BudgetSummaryResponse.builder()
@@ -289,5 +306,39 @@ public class BudgetService {
                 .endDate(budget.getEndDate())
                 .isOverBudget(spent.compareTo(budget.getAmount()) > 0)
                 .build();
+    }
+
+    /**
+     * Returns a Budget with startDate/endDate replaced to reflect the CURRENT
+     * rolling period window, based on the budget's period type.
+     *
+     * MONTHLY → first day of current month … last day of current month
+     * WEEKLY  → most recent Monday … coming Sunday
+     *
+     * The stored startDate/endDate are the original creation window and are NOT
+     * used for "is active today" checks — only the rolling window matters.
+     * This means a MONTHLY budget never expires; it simply rolls each month.
+     */
+    private Budget applyCurrentPeriodWindow(Budget budget, LocalDate today) {
+        LocalDate start;
+        LocalDate end;
+        if (budget.getPeriod() == Budget.BudgetPeriod.MONTHLY) {
+            start = today.withDayOfMonth(1);
+            end   = today.withDayOfMonth(today.lengthOfMonth());
+        } else { // WEEKLY — Mon to Sun
+            int dow = today.getDayOfWeek().getValue(); // 1=Mon … 7=Sun
+            start = today.minusDays(dow - 1);
+            end   = today.plusDays(7 - dow);
+        }
+        // Return a shallow copy with updated dates — don't mutate the JPA entity
+        Budget copy = new Budget();
+        copy.setId(budget.getId());
+        copy.setUser(budget.getUser());
+        copy.setCategory(budget.getCategory());
+        copy.setAmount(budget.getAmount());
+        copy.setPeriod(budget.getPeriod());
+        copy.setStartDate(start);
+        copy.setEndDate(end);
+        return copy;
     }
 }
