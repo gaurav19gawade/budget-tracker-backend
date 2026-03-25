@@ -142,14 +142,22 @@ public class TellerService {
                 String tellerTxnId = Objects.toString(t.get("id"), null);
                 if (tellerTxnId == null) continue;
 
-                // Derive direction from amount sign — this is the ground truth for credit vs debit.
-                // Teller’s "type" field encodes payment method (ach, wire, check, card_payment, etc.),
-                // NOT direction. A positive amount means money arrived (credit); negative means money left (debit).
+                // Derive direction from amount sign — BUT the convention is account-type dependent.
+                //
+                // DEPOSITORY accounts (checking/savings):
+                //   positive = money IN  (credit: salary, deposit, refund)
+                //   negative = money OUT (debit: purchase, withdrawal, payment)
+                //
+                // CREDIT accounts (credit card):
+                //   positive = charge/purchase -> debit  (you OWE more on the card)
+                //   negative = payment/refund  -> credit (balance reduced)
+                //
+                // Source: Teller docs show ATM Withdrawal on a credit account as positive amount.
                 BigDecimal rawAmount = parseAmount(t.get("amount"));
-                // Teller convention (confirmed from API): POSITIVE amount = credit (money IN, e.g. salary)
-                //                                               NEGATIVE amount = debit  (money OUT, e.g. purchases)
-                String transactionType = (rawAmount != null && rawAmount.compareTo(BigDecimal.ZERO) > 0)
-                        ? "credit" : "debit";
+                boolean isCreditAccount = "credit".equalsIgnoreCase(accountType);
+                boolean isPositive = rawAmount != null && rawAmount.compareTo(BigDecimal.ZERO) > 0;
+                // Credit card: flip sign. Depository: use sign as-is.
+                String transactionType = (isCreditAccount ? !isPositive : isPositive) ? "credit" : "debit";
 
                 if (knownIds.contains(tellerTxnId)) {
                     // Row already exists. Correct the stored type if it diverges from Teller’s value —
