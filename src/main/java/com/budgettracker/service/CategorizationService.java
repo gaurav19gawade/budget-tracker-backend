@@ -111,8 +111,10 @@ public class CategorizationService {
         put("gas station",     "Gas");
         put("fuel",            "Gas");
 
+        //Amazon
+        put("amazon", "Amazon");
+
         // Shopping
-        put("amazon",          "Shopping");
         put("ebay",            "Shopping");
         put("etsy",            "Shopping");
         put("best buy",        "Shopping");
