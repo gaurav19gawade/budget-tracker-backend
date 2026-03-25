@@ -43,6 +43,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Set<String> findExistingTellerTransactionIds(@Param("enrollmentId") Long enrollmentId);
 
     /**
+     * Sums all credit (income) transactions for a user within a date range.
+     * Used by BudgetService to compute net cash flow on the dashboard.
+     */
+    @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
+            "WHERE t.user.id = :userId " +
+            "AND t.transactionType = 'credit' " +
+            "AND t.date BETWEEN :startDate AND :endDate")
+    BigDecimal sumCreditTransactions(
+            @Param("userId") Long userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    /**
      * Deletes all bank-synced (non-manual) transactions for an enrollment.
      * Used by force-resync to wipe stale data before a clean re-import.
      */

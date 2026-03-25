@@ -152,6 +152,15 @@ public class BudgetService {
                 .multiply(BigDecimal.valueOf(100)).doubleValue()
                 : 0.0;
 
+        // ── Income for net cash flow card ──────────────────────────────────────
+        // Use current month as the income window (same as the rolling budget period).
+        LocalDate incomeStart = today.withDayOfMonth(1);
+        LocalDate incomeEnd   = today.withDayOfMonth(today.lengthOfMonth());
+        BigDecimal totalIncome = transactionRepository
+                .sumCreditTransactions(userId, incomeStart, incomeEnd);
+        if (totalIncome == null) totalIncome = BigDecimal.ZERO;
+        BigDecimal netCashFlow = totalIncome.subtract(totalSpent);
+
         return BudgetSummaryResponse.builder()
                 .totalBudget(totalBudget)
                 .totalSpent(totalSpent)
@@ -159,6 +168,8 @@ public class BudgetService {
                 .overallPercentageUsed(overallPercentage)
                 .categoriesOverBudget((int) categoriesOverBudget)
                 .budgets(budgetResponses)
+                .totalIncome(totalIncome)
+                .netCashFlow(netCashFlow)
                 .build();
     }
 
@@ -231,8 +242,13 @@ public class BudgetService {
      */
     private List<BudgetResponse> mapBudgetsToResponses(Long userId, List<Budget> budgets) {
         if (budgets.isEmpty()) return Collections.emptyList();
-        Map<Long, BigDecimal> spendMap = buildSpendMap(userId, budgets);
-        return budgets.stream()
+        LocalDate today = LocalDate.now();
+        // Apply rolling period window so displayed dates reflect current period, not creation dates
+        List<Budget> withCurrentDates = budgets.stream()
+                .map(b -> applyCurrentPeriodWindow(b, today))
+                .collect(Collectors.toList());
+        Map<Long, BigDecimal> spendMap = buildSpendMap(userId, withCurrentDates);
+        return withCurrentDates.stream()
                 .map(b -> buildResponse(b, spendMap.getOrDefault(b.getCategory().getId(), BigDecimal.ZERO)))
                 .collect(Collectors.toList());
     }

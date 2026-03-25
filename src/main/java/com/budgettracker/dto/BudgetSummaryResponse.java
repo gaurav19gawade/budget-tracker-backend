@@ -17,7 +17,11 @@ public class BudgetSummaryResponse {
     private BigDecimal totalBudget;
     private BigDecimal totalSpent;
     private BigDecimal totalRemaining;
-    private Double overallPercentageUsed;
-    private Integer categoriesOverBudget;
+    private Double     overallPercentageUsed;
+    private Integer    categoriesOverBudget;
     private List<BudgetResponse> budgets;
+
+    // Net cash flow fields — income from bank credits this period
+    private BigDecimal totalIncome;    // sum of credit transactions this month
+    private BigDecimal netCashFlow;    // totalIncome - totalSpent
 }

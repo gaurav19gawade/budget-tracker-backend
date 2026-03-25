@@ -13,6 +13,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -38,12 +39,18 @@ public class AnalyticsService {
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // All transactions (debits + credits) needed for monthly income breakdown
+        List<Transaction> credits = transactions.stream()
+                .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
+                .toList();
+
         return AnalyticsSummaryResponse.builder()
                 .totalSpent(totalSpent)
                 .totalTransactions(BigDecimal.valueOf(debits.size()))
                 .byCategory(buildCategorySpend(debits, totalSpent))
                 .byDay(buildDailySpend(debits, startDate, endDate))
                 .topMerchants(buildTopMerchants(debits))
+                .byMonth(buildMonthlySpend(debits, credits, startDate, endDate))
                 .build();
     }
 
@@ -113,15 +120,79 @@ public class AnalyticsService {
                 ));
 
         return byMerchant.entrySet().stream()
-                .map(e -> MerchantSpend.builder()
-                        .merchantName(e.getKey())
-                        .amount(e.getValue().stream()
-                                .map(Transaction::getAmount)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add))
-                        .transactionCount(e.getValue().size())
-                        .build())
+                .map(e -> {
+                    List<Transaction> txns = e.getValue();
+                    BigDecimal total = txns.stream()
+                            .map(Transaction::getAmount)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                    // Find the most common category for this merchant
+                    String catName = null;
+                    String catIcon = null;
+                    Optional<Map.Entry<String, Long>> topCat = txns.stream()
+                            .filter(tx -> tx.getCategory() != null)
+                            .collect(Collectors.groupingBy(
+                                    tx -> tx.getCategory().getName(),
+                                    Collectors.counting()))
+                            .entrySet().stream()
+                            .max(Map.Entry.comparingByValue());
+                    if (topCat.isPresent()) {
+                        String catNameFinal = topCat.get().getKey();
+                        catName = catNameFinal;
+                        catIcon = txns.stream()
+                                .filter(tx -> tx.getCategory() != null
+                                        && catNameFinal.equals(tx.getCategory().getName()))
+                                .findFirst()
+                                .map(tx -> tx.getCategory().getIcon())
+                                .orElse(null);
+                    }
+
+                    return MerchantSpend.builder()
+                            .merchantName(e.getKey())
+                            .amount(total)
+                            .transactionCount(txns.size())
+                            .categoryName(catName)
+                            .categoryIcon(catIcon)
+                            .build();
+                })
                 .sorted(Comparator.comparing(MerchantSpend::getAmount).reversed())
-                .limit(8)
+                .limit(10)
                 .collect(Collectors.toList());
+    }
+
+    private List<MonthlySpend> buildMonthlySpend(List<Transaction> debits,
+                                                 List<Transaction> credits,
+                                                 LocalDate startDate, LocalDate endDate) {
+        // Group debits by year-month
+        Map<java.time.YearMonth, BigDecimal> debitByMonth = debits.stream()
+                .collect(Collectors.groupingBy(
+                        tx -> java.time.YearMonth.from(tx.getDate()),
+                        Collectors.reducing(BigDecimal.ZERO, Transaction::getAmount, BigDecimal::add)
+                ));
+
+        // Group credits by year-month
+        Map<java.time.YearMonth, BigDecimal> creditByMonth = credits.stream()
+                .collect(Collectors.groupingBy(
+                        tx -> java.time.YearMonth.from(tx.getDate()),
+                        Collectors.reducing(BigDecimal.ZERO, Transaction::getAmount, BigDecimal::add)
+                ));
+
+        // Enumerate every month in range
+        java.time.YearMonth startMonth = java.time.YearMonth.from(startDate);
+        java.time.YearMonth endMonth   = java.time.YearMonth.from(endDate);
+        List<MonthlySpend> result = new ArrayList<>();
+
+        java.time.YearMonth cursor = startMonth;
+        while (!cursor.isAfter(endMonth)) {
+            result.add(MonthlySpend.builder()
+                    .month(cursor.toString())
+                    .label(cursor.getMonth().getDisplayName(
+                            java.time.format.TextStyle.SHORT, java.util.Locale.US))
+                    .spent(debitByMonth.getOrDefault(cursor, BigDecimal.ZERO))
+                    .income(creditByMonth.getOrDefault(cursor, BigDecimal.ZERO))
+                    .build());
+            cursor = cursor.plusMonths(1);
+        }
+        return result;
     }
 }
