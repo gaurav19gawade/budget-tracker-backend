@@ -13,4 +13,6 @@ public class SyncResult {
     private int accountsFound;
     private int transactionsSynced;
     private int transactionsCategorized;
+    private int transactionsDeleted;
+    private int daysBack;
 }

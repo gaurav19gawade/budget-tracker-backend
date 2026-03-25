@@ -42,6 +42,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "AND t.tellerTransactionId IS NOT NULL")
     Set<String> findExistingTellerTransactionIds(@Param("enrollmentId") Long enrollmentId);
 
+    /**
+     * Deletes all bank-synced (non-manual) transactions for an enrollment.
+     * Used by force-resync to wipe stale data before a clean re-import.
+     */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM Transaction t WHERE t.tellerEnrollment.id = :enrollmentId AND t.isManual = false")
+    int deleteByTellerEnrollmentIdAndIsManualFalse(@Param("enrollmentId") Long enrollmentId);
+
     @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.category " +
             "WHERE t.user.id = :userId " +
             "AND t.date BETWEEN :startDate AND :endDate " +

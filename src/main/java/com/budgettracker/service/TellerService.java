@@ -76,13 +76,37 @@ public class TellerService {
     // Note: NOT @Transactional — saveAll() commits atomically per enrollment, which is fine
     // because removeStaleEnrollments() ensures at most one enrollment per user+institution.
     public SyncResult syncTransactions(Long tellerEnrollmentDbId) {
+        return syncTransactions(tellerEnrollmentDbId, 30, false);
+    }
+
+    public SyncResult syncTransactions(Long tellerEnrollmentDbId, int daysBack) {
+        return syncTransactions(tellerEnrollmentDbId, daysBack, false);
+    }
+
+    /**
+     * Core sync logic.
+     * @param forceResync when true, deletes all existing bank transactions for this enrollment
+     *                    before re-importing. Fixes stale/mis-classified rows that can't be
+     *                    corrected in-place (e.g. wrong transactionType from an old implementation).
+     */
+    @Transactional
+    public SyncResult syncTransactions(Long tellerEnrollmentDbId, int daysBack, boolean forceResync) {
         TellerEnrollment enrollment = tellerEnrollmentRepository.findById(tellerEnrollmentDbId)
                 .orElseThrow(() -> new RuntimeException("Teller enrollment not found"));
 
         List<Map<String, Object>> accounts = listAccounts(enrollment.getAccessToken());
 
         LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(30);
+        LocalDate startDate = endDate.minusDays(daysBack);
+
+        // On force-resync: wipe all existing bank-synced rows for this enrollment so they
+        // get re-inserted fresh with the correct transactionType derived from amount sign.
+        int deleted = 0;
+        if (forceResync) {
+            deleted = transactionRepository.deleteByTellerEnrollmentIdAndIsManualFalse(tellerEnrollmentDbId);
+            log.info("Force-resync: deleted {} stale bank transactions for enrollment {}",
+                    deleted, tellerEnrollmentDbId);
+        }
 
         // Pre-load all teller IDs already stored for this enrollment in one query.
         // Avoids an existsByTellerTransactionId() round-trip for every row in the loop.
@@ -195,6 +219,8 @@ public class TellerService {
                 .accountsFound(accounts.size())
                 .transactionsSynced(saved)
                 .transactionsCategorized(categorized)
+                .transactionsDeleted(deleted)
+                .daysBack(daysBack)
                 .build();
     }
 

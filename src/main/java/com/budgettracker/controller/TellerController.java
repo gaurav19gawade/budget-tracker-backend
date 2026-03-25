@@ -51,9 +51,26 @@ public class TellerController {
     @PostMapping("/sync/{enrollmentDbId}")
     public ResponseEntity<SyncResult> syncTransactions(
             @AuthenticationPrincipal UserPrincipal currentUser,
-            @PathVariable Long enrollmentDbId) {
+            @PathVariable Long enrollmentDbId,
+            @RequestParam(defaultValue = "30") int daysBack) {
 
-        SyncResult result = tellerService.syncTransactions(enrollmentDbId);
+        int safeDays = Math.min(Math.max(daysBack, 1), 365); // clamp 1–365
+        SyncResult result = tellerService.syncTransactions(enrollmentDbId, safeDays);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Force re-sync: deletes all existing bank-synced transactions for this enrollment,
+     * then re-imports from Teller. Use this to fix mis-classified transactionType data.
+     */
+    @PostMapping("/force-resync/{enrollmentDbId}")
+    public ResponseEntity<SyncResult> forceResyncTransactions(
+            @AuthenticationPrincipal UserPrincipal currentUser,
+            @PathVariable Long enrollmentDbId,
+            @RequestParam(defaultValue = "30") int daysBack) {
+
+        int safeDays = Math.min(Math.max(daysBack, 1), 365);
+        SyncResult result = tellerService.syncTransactions(enrollmentDbId, safeDays, true);
         return ResponseEntity.ok(result);
     }
 
