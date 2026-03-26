@@ -43,9 +43,14 @@ public class AnalyticsService {
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // All transactions (debits + credits) needed for monthly income breakdown
+        // All transactions (debits + credits) needed for monthly income breakdown.
+        // Excluded categories (e.g. Credit Card Payment, Internal Transfer) are filtered
+        // out so they don't inflate the income figure — same guard used on the expense side.
         List<Transaction> credits = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
                 .toList();
 
         return AnalyticsSummaryResponse.builder()
@@ -208,9 +213,14 @@ public class AnalyticsService {
         List<Transaction> transactions = transactionRepository
                 .findByUserIdAndDateRange(userId, start, end);
 
-        // Earned = sum of all credit transactions this month
+        // Earned = sum of credit transactions this month, excluding transfers/CC payments
+        // (categories with isExcluded=true). Without this guard, a $3k CC payment from
+        // your checking account inflates household income by $3k every month.
         BigDecimal earned = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 

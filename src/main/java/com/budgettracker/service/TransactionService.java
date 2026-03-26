@@ -50,6 +50,8 @@ public class TransactionService {
                 .merchantName(request.getMerchantName())
                 .description(request.getDescription())
                 .category(category)
+                // Default to "debit" (expense) if not specified. Pass "credit" to log salary/income.
+                .transactionType(request.getTransactionType() != null ? request.getTransactionType() : "debit")
                 .isManual(true)
                 .pending(false)
                 .build();
