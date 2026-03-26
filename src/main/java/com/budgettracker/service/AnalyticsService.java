@@ -170,8 +170,8 @@ public class AnalyticsService {
     }
 
     private List<MonthlySpend> buildMonthlySpend(List<Transaction> debits,
-                                                  List<Transaction> credits,
-                                                  LocalDate startDate, LocalDate endDate) {
+                                                 List<Transaction> credits,
+                                                 LocalDate startDate, LocalDate endDate) {
         // Group debits by year-month
         Map<java.time.YearMonth, BigDecimal> debitByMonth = debits.stream()
                 .collect(Collectors.groupingBy(
