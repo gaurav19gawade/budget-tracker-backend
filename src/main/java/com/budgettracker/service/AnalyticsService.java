@@ -29,10 +29,14 @@ public class AnalyticsService {
 
         // Only count debits (money out) as "spend".
         // Credits include salary deposits, Zelle received, refunds, etc. —
-        // including them would inflate totals and pollute merchant/category breakdowns.
+        // Excluded categories (e.g. Credit Card Payment) are also filtered out —
+        // they are transfers, not real expenses.
         List<Transaction> debits = transactions.stream()
                 .filter(tx -> !"credit".equalsIgnoreCase(tx.getTransactionType()))
                 .filter(tx -> tx.getAmount().compareTo(BigDecimal.ZERO) > 0)
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
                 .toList();
 
         BigDecimal totalSpent = debits.stream()
@@ -161,8 +165,8 @@ public class AnalyticsService {
     }
 
     private List<MonthlySpend> buildMonthlySpend(List<Transaction> debits,
-                                                 List<Transaction> credits,
-                                                 LocalDate startDate, LocalDate endDate) {
+                                                  List<Transaction> credits,
+                                                  LocalDate startDate, LocalDate endDate) {
         // Group debits by year-month
         Map<java.time.YearMonth, BigDecimal> debitByMonth = debits.stream()
                 .collect(Collectors.groupingBy(
@@ -194,5 +198,46 @@ public class AnalyticsService {
             cursor = cursor.plusMonths(1);
         }
         return result;
+    }
+
+    public com.budgettracker.dto.MonthlyOverviewResponse getMonthlyOverview(Long userId) {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate start = today.withDayOfMonth(1);
+        java.time.LocalDate end   = today.withDayOfMonth(today.lengthOfMonth());
+
+        List<Transaction> transactions = transactionRepository
+                .findByUserIdAndDateRange(userId, start, end);
+
+        // Earned = sum of all credit transactions this month
+        BigDecimal earned = transactions.stream()
+                .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
+                .map(Transaction::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Spent = sum of debit transactions, excluding transfer/excluded categories
+        BigDecimal spent = transactions.stream()
+                .filter(tx -> !"credit".equalsIgnoreCase(tx.getTransactionType()))
+                .filter(tx -> tx.getAmount().compareTo(BigDecimal.ZERO) > 0)
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
+                .map(Transaction::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal saved = earned.subtract(spent);
+
+        String month      = today.getMonth().getDisplayName(
+                java.time.format.TextStyle.FULL, java.util.Locale.US) + " " + today.getYear();
+        String monthShort = today.getMonth().getDisplayName(
+                java.time.format.TextStyle.SHORT, java.util.Locale.US) + " " + today.getYear();
+
+        return com.budgettracker.dto.MonthlyOverviewResponse.builder()
+                .month(month)
+                .monthShort(monthShort)
+                .earned(earned)
+                .spent(spent)
+                .saved(saved)
+                .isSaving(saved.compareTo(BigDecimal.ZERO) >= 0)
+                .build();
     }
 }

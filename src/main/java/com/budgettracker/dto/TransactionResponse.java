@@ -20,8 +20,9 @@ public class TransactionResponse {
     private LocalDate date;
     private String merchantName;
     private String description;
-    private Long categoryId;
-    private String categoryName;
+    private Long    categoryId;
+    private String  categoryName;
+    private Boolean categoryIsExcluded;
     private Boolean isManual;
     private Boolean pending;
     private String tellerTransactionId;

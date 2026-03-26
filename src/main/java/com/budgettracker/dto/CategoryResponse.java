@@ -11,8 +11,9 @@ import lombok.NoArgsConstructor;
 @Builder
 public class CategoryResponse {
 
-    private Long id;
-    private String name;
-    private String icon;
-    private String color;
+    private Long    id;
+    private String  name;
+    private String  icon;
+    private String  color;
+    private Boolean isExcluded;  // true = transfer/excluded from spend totals
 }

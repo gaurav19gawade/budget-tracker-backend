@@ -18,6 +18,13 @@ public class AnalyticsController {
 
     private final AnalyticsService analyticsService;
 
+    @GetMapping("/monthly-overview")
+    public ResponseEntity<com.budgettracker.dto.MonthlyOverviewResponse> getMonthlyOverview(
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+
+        return ResponseEntity.ok(analyticsService.getMonthlyOverview(currentUser.getId()));
+    }
+
     @GetMapping("/summary")
     public ResponseEntity<AnalyticsSummaryResponse> getSummary(
             @AuthenticationPrincipal UserPrincipal currentUser,

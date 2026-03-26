@@ -39,6 +39,7 @@ public class CategoryService {
                 .name(request.getName())
                 .icon(request.getIcon())
                 .color(request.getColor())
+                .isExcluded(request.getIsExcluded() != null ? request.getIsExcluded() : false)
                 .build();
 
         category = categoryRepository.save(category);
@@ -84,6 +85,9 @@ public class CategoryService {
         category.setName(request.getName());
         category.setIcon(request.getIcon());
         category.setColor(request.getColor());
+        if (request.getIsExcluded() != null) {
+            category.setIsExcluded(request.getIsExcluded());
+        }
 
         category = categoryRepository.save(category);
         log.info("Updated category {} for user {}", categoryId, userId);
@@ -110,6 +114,7 @@ public class CategoryService {
                 .name(category.getName())
                 .icon(category.getIcon())
                 .color(category.getColor())
+                .isExcluded(category.getIsExcluded() != null ? category.getIsExcluded() : false)
                 .build();
     }
 }

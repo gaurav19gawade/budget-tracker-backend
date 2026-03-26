@@ -111,10 +111,22 @@ public class CategorizationService {
         put("gas station",     "Gas");
         put("fuel",            "Gas");
 
-        //Amazon
-        put("amazon", "Amazon");
+        // Credit Card Payments & Transfers (excluded from spend totals)
+        put("automatic payment",     "Credit Card Payment");
+        put("autopay",               "Credit Card Payment");
+        put("payment thank you",     "Credit Card Payment");
+        put("online payment",        "Credit Card Payment");
+        put("credit card payment",   "Credit Card Payment");
+        put("card payment",          "Credit Card Payment");
+        put("minimum payment",       "Credit Card Payment");
+        put("chase credit crd",      "Credit Card Payment");
+        put("amex epayment",         "Credit Card Payment");
+        put("discover e-payment",    "Credit Card Payment");
+        put("citi autopay",          "Credit Card Payment");
+        put("capital one payment",   "Credit Card Payment");
 
         // Shopping
+        put("amazon",          "Shopping");
         put("ebay",            "Shopping");
         put("etsy",            "Shopping");
         put("best buy",        "Shopping");

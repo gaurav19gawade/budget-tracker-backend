@@ -193,6 +193,7 @@ public class TransactionService {
                 .description(transaction.getDescription())
                 .categoryId(transaction.getCategory() != null ? transaction.getCategory().getId() : null)
                 .categoryName(transaction.getCategory() != null ? transaction.getCategory().getName() : null)
+                .categoryIsExcluded(transaction.getCategory() != null ? transaction.getCategory().getIsExcluded() : null)
                 .isManual(transaction.getIsManual())
                 .pending(transaction.getPending())
                 .tellerTransactionId(transaction.getTellerTransactionId())

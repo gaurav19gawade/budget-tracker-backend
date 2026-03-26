@@ -11,9 +11,8 @@ import lombok.NoArgsConstructor;
 public class CategoryRequest {
 
     @NotBlank(message = "Category name is required")
-    private String name;
-
-    private String icon;
-
-    private String color;
+    private String  name;
+    private String  icon;
+    private String  color;
+    private Boolean isExcluded; // optional — defaults to false
 }

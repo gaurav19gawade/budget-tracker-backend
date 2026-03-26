@@ -43,6 +43,15 @@ public class Category {
     @ToString.Include
     private String color;
 
+    /**
+     * When true, transactions in this category are excluded from spend totals,
+     * budget tracking, and analytics. Used for transfer-type categories like
+     * "Credit Card Payment" that are neither income nor real expenses.
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean isExcluded = false;
+
     @OneToMany(mappedBy = "category", cascade = CascadeType.ALL)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

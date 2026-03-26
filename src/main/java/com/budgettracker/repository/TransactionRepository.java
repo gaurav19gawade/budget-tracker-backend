@@ -90,6 +90,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "AND t.category.id = :categoryId " +
             "AND t.date BETWEEN :startDate AND :endDate " +
             "AND (t.transactionType IS NULL OR t.transactionType <> 'credit') " +
+            "AND (t.category.isExcluded IS NULL OR t.category.isExcluded = false) " +
             "AND t.amount > 0")
     BigDecimal sumAmountByUserIdAndCategoryIdAndDateRange(
             @Param("userId") Long userId,
@@ -104,6 +105,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "AND t.category.id IN :categoryIds " +
             "AND t.date BETWEEN :startDate AND :endDate " +
             "AND (t.transactionType IS NULL OR t.transactionType <> 'credit') " +
+            "AND (t.category.isExcluded IS NULL OR t.category.isExcluded = false) " +
             "AND t.amount > 0 " +
             "GROUP BY t.category.id")
     List<Object[]> sumAmountGroupedByCategoryIds(
