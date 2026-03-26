@@ -110,9 +110,24 @@ public class AnthropicCategorizationService {
 
     private String buildPrompt(List<Transaction> transactions, List<String> categoryNames) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Categorize each transaction into exactly one of these categories:\n");
+        sb.append("Categorize each bank transaction into exactly one of these categories:\n");
         sb.append(String.join(", ", categoryNames));
         sb.append("\n\n");
+
+        // Explicit rules to prevent the LLM from over-applying payment/transfer categories
+        sb.append("IMPORTANT RULES:\n");
+        sb.append("1. \"Credit Card Payment\" is ONLY for automatic/scheduled credit card bill payments ");
+        sb.append("from a bank account to a credit card company. ");
+        sb.append("Examples: \"CHASE CREDIT CRD AUTOPAY\", \"AUTOMATIC PAYMENT\", \"AMEX EPAYMENT\".\n");
+        sb.append("2. Do NOT assign \"Credit Card Payment\" to: Zelle transfers, peer-to-peer payments, ");
+        sb.append("PayPal, Venmo, wire transfers, ACH transfers between personal accounts, ");
+        sb.append("or any payment to a person or business for goods/services.\n");
+        sb.append("3. Zelle payments, Venmo, PayPal to individuals = use null (cannot confidently categorize).\n");
+        sb.append("4. Only use \"Credit Card Payment\" when the description explicitly mentions ");
+        sb.append("autopay, automatic payment, or a named credit card company (Chase, Amex, Citi, etc.).\n");
+        sb.append("5. Use null rather than guessing — it is better to leave a transaction uncategorized ");
+        sb.append("than to assign the wrong category.\n\n");
+
         sb.append("Transactions (id | merchant | description | amount):\n");
 
         for (Transaction tx : transactions) {
