@@ -111,19 +111,18 @@ public class CategorizationService {
         put("gas station",     "Gas");
         put("fuel",            "Gas");
 
-        // Credit Card Payments & Transfers (excluded from spend totals)
-        put("automatic payment",     "Credit Card Payment");
-        put("autopay",               "Credit Card Payment");
-        put("payment thank you",     "Credit Card Payment");
-        put("online payment",        "Credit Card Payment");
-        put("credit card payment",   "Credit Card Payment");
-        put("card payment",          "Credit Card Payment");
-        put("minimum payment",       "Credit Card Payment");
-        put("chase credit crd",      "Credit Card Payment");
-        put("amex epayment",         "Credit Card Payment");
-        put("discover e-payment",    "Credit Card Payment");
-        put("citi autopay",          "Credit Card Payment");
-        put("capital one payment",   "Credit Card Payment");
+        // Credit Card Payments only — deliberately narrow to avoid catching
+        // Zelle, ACH transfers, or other legitimate expense payments.
+        put("automatic payment",     "Credit Card Payment");  // bank autopay confirmation
+        put("autopay",               "Credit Card Payment");  // explicit autopay
+        put("payment thank you",     "Credit Card Payment");  // credit card confirmation msg
+        put("credit card payment",   "Credit Card Payment");  // explicit label
+        put("minimum payment",       "Credit Card Payment");  // min payment on card
+        put("chase credit crd",      "Credit Card Payment");  // Chase-specific
+        put("amex epayment",         "Credit Card Payment");  // Amex-specific
+        put("discover e-payment",    "Credit Card Payment");  // Discover-specific
+        put("citi autopay",          "Credit Card Payment");  // Citi-specific
+        put("capital one payment",   "Credit Card Payment");  // CapOne-specific
 
         // Shopping
         put("amazon",          "Shopping");
