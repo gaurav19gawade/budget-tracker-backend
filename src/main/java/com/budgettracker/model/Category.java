@@ -48,7 +48,7 @@ public class Category {
      * budget tracking, and analytics. Used for transfer-type categories like
      * "Credit Card Payment" that are neither income nor real expenses.
      */
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "boolean default false")
     @Builder.Default
     private Boolean isExcluded = false;
 
