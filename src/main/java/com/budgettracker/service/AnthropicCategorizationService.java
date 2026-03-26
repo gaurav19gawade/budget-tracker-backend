@@ -114,19 +114,40 @@ public class AnthropicCategorizationService {
         sb.append(String.join(", ", categoryNames));
         sb.append("\n\n");
 
-        // Explicit rules to prevent the LLM from over-applying payment/transfer categories
-        sb.append("IMPORTANT RULES:\n");
-        sb.append("1. \"Credit Card Payment\" is ONLY for automatic/scheduled credit card bill payments ");
-        sb.append("from a bank account to a credit card company. ");
-        sb.append("Examples: \"CHASE CREDIT CRD AUTOPAY\", \"AUTOMATIC PAYMENT\", \"AMEX EPAYMENT\".\n");
-        sb.append("2. Do NOT assign \"Credit Card Payment\" to: Zelle transfers, peer-to-peer payments, ");
-        sb.append("PayPal, Venmo, wire transfers, ACH transfers between personal accounts, ");
-        sb.append("or any payment to a person or business for goods/services.\n");
-        sb.append("3. Zelle payments, Venmo, PayPal to individuals = use null (cannot confidently categorize).\n");
-        sb.append("4. Only use \"Credit Card Payment\" when the description explicitly mentions ");
-        sb.append("autopay, automatic payment, or a named credit card company (Chase, Amex, Citi, etc.).\n");
-        sb.append("5. Use null rather than guessing — it is better to leave a transaction uncategorized ");
-        sb.append("than to assign the wrong category.\n\n");
+        sb.append("RULES (read carefully before categorizing):\n\n");
+
+        sb.append("EXCLUDED categories (transfers/excluded from budget totals):\n");
+        sb.append("- \"Credit Card Payment\": ONLY for scheduled CC bill payments. ");
+        sb.append("Examples: CHASE CREDIT CRD AUTOPAY, AMEX EPAYMENT, CAPITAL ONE AUTOPAY.\n");
+        sb.append("- \"Transfer\": Online transfers between own bank accounts ");
+        sb.append("(e.g. 'Online Transfer to CHK', 'Online Transfer from SAV').\n");
+        sb.append("- \"Salary\": Payroll deposits (PPD PAYROLL, REG.SALARY, DIRECT DEPOSIT from employer).\n");
+        sb.append("- \"Investments\": Robinhood, Fidelity (FID BKG SVC), Vanguard, Schwab, Aspora.\n");
+        sb.append("- \"Refund\": Credits on credit card that are returns/refunds, RETURN OF POSTED CHECK.\n\n");
+
+        sb.append("EXPENSE categories:\n");
+        sb.append("- \"Mortgage\": M&T Mortgage, NSM/Mr.Cooper, PL*PatricianAsso rent payments.\n");
+        sb.append("- \"Childcare\": Goddard School, Cadence Education, daycare centers.\n");
+        sb.append("- \"Nanny\": use null — Zelle to individuals cannot be auto-categorized.\n");
+        sb.append("- \"Car Payment\": HMF HMFUSA (Hyundai), Toyota Motor Credit, Ford Motor Credit.\n");
+        sb.append("- \"Utilities\": National Grid (NGRID06), Eversource, Verizon, Comcast.\n");
+        sb.append("- \"Gas\": Citgo, Shell, Exxon, Costco Gas (NOT Costco warehouse).\n");
+        sb.append("- \"Transportation\": Lyft, Uber, EZPass, SpotHero, ParkM, Logan Parking.\n");
+        sb.append("- \"Travel\": Delta Air, United, Southwest, JetBlue, Airbnb, hotels.\n");
+        sb.append("- \"Healthcare\": PatientFi, CareCredit, medical offices, hospitals.\n");
+        sb.append("- \"Remittance\": Western Union, MoneyGram, Remitly, Wise international transfers.\n");
+        sb.append("- \"HOA\": Dean Farm Ridge, homeowners association payments.\n");
+        sb.append("- \"Bank Fee\": Overdraft fee, insufficient funds fee, monthly account fee.\n");
+        sb.append("- \"Donations\": World Food Program, Red Cross, UNICEF, charity.\n");
+        sb.append("- \"Food Delivery\": DoorDash, Uber Eats, Grubhub, Tiffin meal service.\n");
+        sb.append("- \"Groceries\": Whole Foods, Wegmans, Shaw's, Apna Bazar, Costco warehouse.\n");
+        sb.append("- \"Shopping\": Amazon, Macy's, Sephora, Kohl's, H&M, Klarna BNPL payments.\n");
+        sb.append("- \"Entertainment\": Netflix, AMC, Fandango, Peloton, Martini's Pickleball.\n\n");
+
+        sb.append("IMPORTANT:\n");
+        sb.append("- Use null for Zelle payments to individuals — impossible to auto-categorize.\n");
+        sb.append("- Use null rather than guessing.\n");
+        sb.append("- Costco GAS = Gas. Costco WHSE (warehouse) = Groceries.\n\n");
 
         sb.append("Transactions (id | merchant | description | amount):\n");
 
@@ -141,7 +162,7 @@ public class AnthropicCategorizationService {
 
         sb.append("\nRespond with ONLY a JSON object mapping transaction id to category name.\n");
         sb.append("Use null for transactions you cannot confidently categorize.\n");
-        sb.append("Example: {\"123\": \"Groceries\", \"124\": \"Transport\", \"125\": null}\n");
+        sb.append("Example: {\"123\": \"Groceries\", \"124\": \"Transportation\", \"125\": null}\n");
         sb.append("Category names must match exactly (case-sensitive) from the list above.");
 
         return sb.toString();
