@@ -49,23 +49,20 @@ public class AnalyticsService {
         //
         // Why depository-only:
         //   Credit-card credits are ALWAYS refunds/returns — never salary or rental income.
-        //   Filtering to depository eliminates the entire Sapphire Reserve refund problem.
+        //   This eliminates the entire Sapphire Reserve refund pollution problem.
         //
-        // Why we still need the isExcluded guard on depository:
-        //   Spouse Zelle transfers, online savings↔checking moves, and investment
-        //   returns (Robinhood) all land as depository credits.
-        //   Those that are categorized as Transfer/Investments (isExcluded=true) are dropped.
+        // Null category = still counts as income.
+        //   Uncategorized payroll (GE Healthcare, Ernst & Young) must not be excluded
+        //   just because the user hasn't categorized it yet.
         //
-        // Why uncategorized (null) depository credits are EXCLUDED:
-        //   null category = not yet reviewed by the user = could be anything.
-        //   It's safer to under-count income than to include unknown credits.
-        //   Once the user categorizes them (Salary, Rental Income, etc.) they will count.
+        // Explicitly excluded categories (Transfer, Investments, Credit Card Payment)
+        //   are the only things dropped. isExcluded=true is the opt-out signal.
         List<Transaction> credits = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
                 .filter(tx -> "depository".equalsIgnoreCase(tx.getAccountType()))
-                .filter(tx -> tx.getCategory() != null
-                        && (tx.getCategory().getIsExcluded() == null
-                        || !tx.getCategory().getIsExcluded()))
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
                 .toList();
 
         return AnalyticsSummaryResponse.builder()
@@ -228,16 +225,15 @@ public class AnalyticsService {
         List<Transaction> transactions = transactionRepository
                 .findByUserIdAndDateRange(userId, start, end);
 
-        // Earned = depository credits with a known non-excluded category only.
-        // - depository-only: CC credits are refunds, not income
-        // - category != null: uncategorized credits are unknown, don't assume income
-        // - !isExcluded: drop Transfer, Investments, Credit Card Payment credits
+        // Earned = depository credits only (CC credits are refunds, not income).
+        // Null category still counts — uncategorized payroll is still income.
+        // Only explicitly excluded categories (Transfer, Investments) are dropped.
         BigDecimal earned = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
                 .filter(tx -> "depository".equalsIgnoreCase(tx.getAccountType()))
-                .filter(tx -> tx.getCategory() != null
-                        && (tx.getCategory().getIsExcluded() == null
-                        || !tx.getCategory().getIsExcluded()))
+                .filter(tx -> tx.getCategory() == null
+                        || tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded())
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 

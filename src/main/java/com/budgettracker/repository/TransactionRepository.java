@@ -44,17 +44,15 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     /**
      * Sums real income (credit) transactions for a user within a date range.
-     * Only counts depository account credits (salary, rental income) that have
-     * a known non-excluded category. CC credits are refunds, not income.
-     * Uncategorized credits are excluded — unknown = don't assume income.
-     * Used by BudgetService to compute net cash flow on the dashboard.
+     * Only counts depository account credits — CC credits are refunds, not income.
+     * Null category still counts (uncategorized payroll is still income).
+     * Only explicitly excluded categories (Transfer, Investments) are dropped.
      */
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.user.id = :userId " +
             "AND t.transactionType = 'credit' " +
             "AND t.accountType = 'depository' " +
-            "AND t.category IS NOT NULL " +
-            "AND (t.category.isExcluded IS NULL OR t.category.isExcluded = false) " +
+            "AND (t.category IS NULL OR t.category.isExcluded IS NULL OR t.category.isExcluded = false) " +
             "AND t.date BETWEEN :startDate AND :endDate")
     BigDecimal sumCreditTransactions(
             @Param("userId") Long userId,
