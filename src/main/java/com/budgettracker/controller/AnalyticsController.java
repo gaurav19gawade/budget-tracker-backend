@@ -20,9 +20,12 @@ public class AnalyticsController {
 
     @GetMapping("/monthly-overview")
     public ResponseEntity<com.budgettracker.dto.MonthlyOverviewResponse> getMonthlyOverview(
-            @AuthenticationPrincipal UserPrincipal currentUser) {
+            @AuthenticationPrincipal UserPrincipal currentUser,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
 
-        return ResponseEntity.ok(analyticsService.getMonthlyOverview(currentUser.getId()));
+        return ResponseEntity.ok(analyticsService.getMonthlyOverview(
+                currentUser.getId(), startDate, endDate));
     }
 
     @GetMapping("/summary")

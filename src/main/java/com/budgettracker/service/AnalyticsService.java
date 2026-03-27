@@ -218,9 +218,14 @@ public class AnalyticsService {
     }
 
     public com.budgettracker.dto.MonthlyOverviewResponse getMonthlyOverview(Long userId) {
+        return getMonthlyOverview(userId, null, null);
+    }
+
+    public com.budgettracker.dto.MonthlyOverviewResponse getMonthlyOverview(
+            Long userId, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         java.time.LocalDate today = java.time.LocalDate.now();
-        java.time.LocalDate start = today.withDayOfMonth(1);
-        java.time.LocalDate end   = today.withDayOfMonth(today.lengthOfMonth());
+        java.time.LocalDate start = startDate != null ? startDate : today.withDayOfMonth(1);
+        java.time.LocalDate end   = endDate   != null ? endDate   : today.withDayOfMonth(today.lengthOfMonth());
 
         List<Transaction> transactions = transactionRepository
                 .findByUserIdAndDateRange(userId, start, end);
@@ -250,10 +255,14 @@ public class AnalyticsService {
 
         BigDecimal saved = earned.subtract(spent);
 
-        String month      = today.getMonth().getDisplayName(
-                java.time.format.TextStyle.FULL, java.util.Locale.US) + " " + today.getYear();
-        String monthShort = today.getMonth().getDisplayName(
-                java.time.format.TextStyle.SHORT, java.util.Locale.US) + " " + today.getYear();
+        // Label: if same month use "March 2026", otherwise use date range "Feb 25 – Mar 27"
+        boolean sameMonth = start.getMonth() == end.getMonth() && start.getYear() == end.getYear();
+        String month = sameMonth
+                ? start.getMonth().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US) + " " + start.getYear()
+                : start.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")) + " – " + end.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy"));
+        String monthShort = sameMonth
+                ? start.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US) + " " + start.getYear()
+                : start.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")) + " – " + end.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"));
 
         return com.budgettracker.dto.MonthlyOverviewResponse.builder()
                 .month(month)
