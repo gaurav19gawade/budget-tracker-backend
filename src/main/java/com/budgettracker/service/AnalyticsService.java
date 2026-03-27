@@ -28,12 +28,14 @@ public class AnalyticsService {
                 .findByUserIdAndDateRange(userId, startDate, endDate);
 
         // Only count debits (money out) as "spend".
-        // Credits include salary deposits, Zelle received, refunds, etc. —
-        // Excluded categories (e.g. Credit Card Payment) are also filtered out —
-        // they are transfers, not real expenses.
+        // We count debits from ALL account types — credit card purchases ARE real expenses.
+        // Excluded categories (Transfer, Investments, Credit Card Payment) are dropped.
+        // Uncategorized debits are included — unknown spending is still spending.
+        // Exception: savings account debits (e.g. "Online Transfer to CHK") are transfers.
         List<Transaction> debits = transactions.stream()
                 .filter(tx -> !"credit".equalsIgnoreCase(tx.getTransactionType()))
                 .filter(tx -> tx.getAmount().compareTo(BigDecimal.ZERO) > 0)
+                .filter(tx -> !"savings".equalsIgnoreCase(tx.getAccountSubtype()))
                 .filter(tx -> tx.getCategory() == null
                         || tx.getCategory().getIsExcluded() == null
                         || !tx.getCategory().getIsExcluded())
@@ -43,14 +45,27 @@ public class AnalyticsService {
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // All transactions (debits + credits) needed for monthly income breakdown.
-        // Excluded categories (e.g. Credit Card Payment, Internal Transfer) are filtered
-        // out so they don't inflate the income figure — same guard used on the expense side.
+        // Real income = credits on DEPOSITORY accounts (checking/savings) only.
+        //
+        // Why depository-only:
+        //   Credit-card credits are ALWAYS refunds/returns — never salary or rental income.
+        //   Filtering to depository eliminates the entire Sapphire Reserve refund problem.
+        //
+        // Why we still need the isExcluded guard on depository:
+        //   Spouse Zelle transfers, online savings↔checking moves, and investment
+        //   returns (Robinhood) all land as depository credits.
+        //   Those that are categorized as Transfer/Investments (isExcluded=true) are dropped.
+        //
+        // Why uncategorized (null) depository credits are EXCLUDED:
+        //   null category = not yet reviewed by the user = could be anything.
+        //   It's safer to under-count income than to include unknown credits.
+        //   Once the user categorizes them (Salary, Rental Income, etc.) they will count.
         List<Transaction> credits = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
-                .filter(tx -> tx.getCategory() == null
-                        || tx.getCategory().getIsExcluded() == null
-                        || !tx.getCategory().getIsExcluded())
+                .filter(tx -> "depository".equalsIgnoreCase(tx.getAccountType()))
+                .filter(tx -> tx.getCategory() != null
+                        && (tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded()))
                 .toList();
 
         return AnalyticsSummaryResponse.builder()
@@ -213,21 +228,24 @@ public class AnalyticsService {
         List<Transaction> transactions = transactionRepository
                 .findByUserIdAndDateRange(userId, start, end);
 
-        // Earned = sum of credit transactions this month, excluding transfers/CC payments
-        // (categories with isExcluded=true). Without this guard, a $3k CC payment from
-        // your checking account inflates household income by $3k every month.
+        // Earned = depository credits with a known non-excluded category only.
+        // - depository-only: CC credits are refunds, not income
+        // - category != null: uncategorized credits are unknown, don't assume income
+        // - !isExcluded: drop Transfer, Investments, Credit Card Payment credits
         BigDecimal earned = transactions.stream()
                 .filter(tx -> "credit".equalsIgnoreCase(tx.getTransactionType()))
-                .filter(tx -> tx.getCategory() == null
-                        || tx.getCategory().getIsExcluded() == null
-                        || !tx.getCategory().getIsExcluded())
+                .filter(tx -> "depository".equalsIgnoreCase(tx.getAccountType()))
+                .filter(tx -> tx.getCategory() != null
+                        && (tx.getCategory().getIsExcluded() == null
+                        || !tx.getCategory().getIsExcluded()))
                 .map(Transaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // Spent = sum of debit transactions, excluding transfer/excluded categories
+        // Spent = debit transactions, excluding transfer/excluded categories and savings transfers
         BigDecimal spent = transactions.stream()
                 .filter(tx -> !"credit".equalsIgnoreCase(tx.getTransactionType()))
                 .filter(tx -> tx.getAmount().compareTo(BigDecimal.ZERO) > 0)
+                .filter(tx -> !"savings".equalsIgnoreCase(tx.getAccountSubtype()))
                 .filter(tx -> tx.getCategory() == null
                         || tx.getCategory().getIsExcluded() == null
                         || !tx.getCategory().getIsExcluded())
