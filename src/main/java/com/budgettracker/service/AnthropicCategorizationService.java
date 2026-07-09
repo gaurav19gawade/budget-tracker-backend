@@ -108,7 +108,47 @@ public class AnthropicCategorizationService {
         return parseResponse(response, categoryLookup);
     }
 
+    // Canonical rule text per category, keyed by the "standard" name. Only rules
+    // whose category (or a known alias of it) actually exists in the user's
+    // category list get included in the prompt — including a rule for a
+    // category the user doesn't have just confuses the model into outputting
+    // an invalid name, which parseResponse then silently drops.
+    private static final Map<String, String> CATEGORY_RULES = new LinkedHashMap<>() {{
+        put("Credit Card Payment", "ONLY for scheduled CC bill payments. Examples: CHASE CREDIT CRD AUTOPAY, AMEX EPAYMENT, CAPITAL ONE AUTOPAY.");
+        put("Transfer", "Online transfers between own bank accounts (e.g. 'Online Transfer to CHK', 'Online Transfer from SAV').");
+        put("Salary", "Payroll deposits (PPD PAYROLL, REG.SALARY, DIRECT DEPOSIT from employer).");
+        put("Investments", "Robinhood, Fidelity (FID BKG SVC), Vanguard, Schwab, Aspora.");
+        put("Refund", "Credits on credit card that are returns/refunds, RETURN OF POSTED CHECK.");
+        put("Mortgage", "M&T Mortgage, NSM/Mr.Cooper, PL*PatricianAsso rent payments.");
+        put("Childcare", "Goddard School, Cadence Education, daycare centers.");
+        put("Car Payment", "HMF HMFUSA (Hyundai), Toyota Motor Credit, Ford Motor Credit.");
+        put("Utilities", "National Grid (NGRID06), Eversource, Verizon, Comcast.");
+        put("Gas", "Citgo, Shell, Exxon, Costco Gas (NOT Costco warehouse).");
+        put("Transportation", "Lyft, Uber, EZPass, SpotHero, ParkM, Logan Parking.");
+        put("Travel", "Delta Air, United, Southwest, JetBlue, Airbnb, hotels.");
+        put("Healthcare", "PatientFi, CareCredit, medical offices, hospitals.");
+        put("Remittance", "Western Union, MoneyGram, Remitly, Wise international transfers.");
+        put("HOA", "Dean Farm Ridge, homeowners association payments.");
+        put("Bank Fee", "Overdraft fee, insufficient funds fee, monthly account fee.");
+        put("Donations", "World Food Program, Red Cross, UNICEF, charity.");
+        put("Food Delivery", "DoorDash, Uber Eats, Grubhub, Tiffin meal service.");
+        put("Groceries", "Whole Foods, Wegmans, Shaw's, Apna Bazar, Costco warehouse.");
+        put("Shopping", "Macy's, Sephora, Kohl's, H&M, Klarna BNPL payments.");
+        put("Entertainment", "Netflix, AMC, Fandango, Peloton, Martini's Pickleball.");
+        put("Amazon", "Amazon.com and Amazon Marketplace purchases specifically.");
+    }};
+
+    // canonical rule-category name (lowercase) -> real user category name it should
+    // resolve to, when the user's category is a differently-worded equivalent.
+    private static final Map<String, String> CATEGORY_ALIASES = Map.of(
+            "transfer", "internal transfer"
+    );
+
     private String buildPrompt(List<Transaction> transactions, List<String> categoryNames) {
+        Set<String> userCategoriesLower = categoryNames.stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
         StringBuilder sb = new StringBuilder();
         sb.append("Categorize each bank transaction into exactly one of these categories:\n");
         sb.append(String.join(", ", categoryNames));
@@ -116,38 +156,50 @@ public class AnthropicCategorizationService {
 
         sb.append("RULES (read carefully before categorizing):\n\n");
 
-        sb.append("EXCLUDED categories (transfers/excluded from budget totals):\n");
-        sb.append("- \"Credit Card Payment\": ONLY for scheduled CC bill payments. ");
-        sb.append("Examples: CHASE CREDIT CRD AUTOPAY, AMEX EPAYMENT, CAPITAL ONE AUTOPAY.\n");
-        sb.append("- \"Transfer\": Online transfers between own bank accounts ");
-        sb.append("(e.g. 'Online Transfer to CHK', 'Online Transfer from SAV').\n");
-        sb.append("- \"Salary\": Payroll deposits (PPD PAYROLL, REG.SALARY, DIRECT DEPOSIT from employer).\n");
-        sb.append("- \"Investments\": Robinhood, Fidelity (FID BKG SVC), Vanguard, Schwab, Aspora.\n");
-        sb.append("- \"Refund\": Credits on credit card that are returns/refunds, RETURN OF POSTED CHECK.\n\n");
+        boolean anyRuleWritten = false;
+        for (Map.Entry<String, String> rule : CATEGORY_RULES.entrySet()) {
+            String canonical = rule.getKey();
+            String canonicalLower = canonical.toLowerCase();
 
-        sb.append("EXPENSE categories:\n");
-        sb.append("- \"Mortgage\": M&T Mortgage, NSM/Mr.Cooper, PL*PatricianAsso rent payments.\n");
-        sb.append("- \"Childcare\": Goddard School, Cadence Education, daycare centers.\n");
-        sb.append("- \"Nanny\": use null — Zelle to individuals cannot be auto-categorized.\n");
-        sb.append("- \"Car Payment\": HMF HMFUSA (Hyundai), Toyota Motor Credit, Ford Motor Credit.\n");
-        sb.append("- \"Utilities\": National Grid (NGRID06), Eversource, Verizon, Comcast.\n");
-        sb.append("- \"Gas\": Citgo, Shell, Exxon, Costco Gas (NOT Costco warehouse).\n");
-        sb.append("- \"Transportation\": Lyft, Uber, EZPass, SpotHero, ParkM, Logan Parking.\n");
-        sb.append("- \"Travel\": Delta Air, United, Southwest, JetBlue, Airbnb, hotels.\n");
-        sb.append("- \"Healthcare\": PatientFi, CareCredit, medical offices, hospitals.\n");
-        sb.append("- \"Remittance\": Western Union, MoneyGram, Remitly, Wise international transfers.\n");
-        sb.append("- \"HOA\": Dean Farm Ridge, homeowners association payments.\n");
-        sb.append("- \"Bank Fee\": Overdraft fee, insufficient funds fee, monthly account fee.\n");
-        sb.append("- \"Donations\": World Food Program, Red Cross, UNICEF, charity.\n");
-        sb.append("- \"Food Delivery\": DoorDash, Uber Eats, Grubhub, Tiffin meal service.\n");
-        sb.append("- \"Groceries\": Whole Foods, Wegmans, Shaw's, Apna Bazar, Costco warehouse.\n");
-        sb.append("- \"Shopping\": Amazon, Macy's, Sephora, Kohl's, H&M, Klarna BNPL payments.\n");
-        sb.append("- \"Entertainment\": Netflix, AMC, Fandango, Peloton, Martini's Pickleball.\n\n");
+            // Resolve to whichever name the user actually has: exact match first,
+            // then a known alias (e.g. "Transfer" -> "Internal Transfer").
+            String resolvedName = null;
+            if (userCategoriesLower.contains(canonicalLower)) {
+                resolvedName = canonical;
+            } else if (CATEGORY_ALIASES.containsKey(canonicalLower)
+                    && userCategoriesLower.contains(CATEGORY_ALIASES.get(canonicalLower))) {
+                String aliasLower = CATEGORY_ALIASES.get(canonicalLower);
+                resolvedName = categoryNames.stream()
+                        .filter(n -> n.equalsIgnoreCase(aliasLower))
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (resolvedName != null) {
+                sb.append("- \"").append(resolvedName).append("\": ").append(rule.getValue()).append("\n");
+                anyRuleWritten = true;
+            }
+        }
+        if (!anyRuleWritten) {
+            sb.append("(No specific merchant rules apply — use your best judgement from the category names alone.)\n");
+        }
+        sb.append("\n");
+
+        // Fallback category: prefer "Misc" if the user has one, otherwise null.
+        String fallback = categoryNames.stream()
+                .filter(n -> n.equalsIgnoreCase("misc"))
+                .findFirst()
+                .orElse(null);
 
         sb.append("IMPORTANT:\n");
         sb.append("- Use null for Zelle payments to individuals — impossible to auto-categorize.\n");
-        sb.append("- Use null rather than guessing.\n");
-        sb.append("- Costco GAS = Gas. Costco WHSE (warehouse) = Groceries.\n\n");
+        if (fallback != null) {
+            sb.append("- If a transaction doesn't clearly fit any category above, use \"")
+                    .append(fallback).append("\" rather than inventing a category name that isn't in the list.\n");
+        } else {
+            sb.append("- Use null rather than guessing — never invent a category name that isn't in the list above.\n");
+        }
+        sb.append("- Costco GAS = Gas category (if present). Costco WHSE (warehouse) = Groceries.\n\n");
 
         sb.append("Transactions (id | merchant | description | amount):\n");
 
@@ -162,8 +214,9 @@ public class AnthropicCategorizationService {
 
         sb.append("\nRespond with ONLY a JSON object mapping transaction id to category name.\n");
         sb.append("Use null for transactions you cannot confidently categorize.\n");
-        sb.append("Example: {\"123\": \"Groceries\", \"124\": \"Transportation\", \"125\": null}\n");
-        sb.append("Category names must match exactly (case-sensitive) from the list above.");
+        sb.append("Example: {\"123\": \"Groceries\", \"124\": \"Shopping\", \"125\": null}\n");
+        sb.append("Category names must match exactly (case-sensitive) one of the categories listed at the top — ");
+        sb.append("never a category from the rules that isn't in that list.");
 
         return sb.toString();
     }

@@ -119,5 +119,37 @@
       clear error instead of hanging the UI forever.
 - [ ] **You still need to**: apply this update, redeploy, retest the resync
       flow with the Anthropic key in place
+
+### 9. Bug: categorization barely working (0/62 keyword, 1/62 LLM)
+- [x] Root cause: your actual categories (12 total: Amazon, Credit Card Payment,
+      Entertainment, Food Delivery, Groceries, HOA, Internal Transfer, Internet,
+      Misc, Restaurants, Shopping, Zelle) don't match the ~23 hardcoded
+      canonical category names the keyword rules AND the LLM prompt's "RULES"
+      section were written against (Salary, Utilities, Gas, Transportation,
+      Mortgage, Healthcare, Bank Fee, Transfer, etc. — most don't exist for
+      you; "Transfer" is named "Internal Transfer" in your data).
+      The LLM prompt told Claude "use ONLY these 12 categories" then
+      immediately gave detailed matching rules for ~23 different ones —
+      contradictory instructions, so Claude often answered with a category
+      name that isn't actually yours, and `parseResponse` correctly (by
+      design) discards anything not in your real list — hence almost
+      everything got dropped silently.
+- [x] Fixed `AnthropicCategorizationService.buildPrompt()` to only include
+      rule text for categories that actually exist for the user (with alias
+      resolution for "Transfer" → "Internal Transfer"), and added an explicit
+      fallback to your "Misc" category instead of letting the model invent
+      an invalid name.
+- [x] Fixed `CategorizationService.findByKeyword()` the same way — keyword
+      rule matches now also try the "Internal Transfer" alias when "Transfer"
+      isn't found, so those get caught in the free keyword pass instead of
+      needing an LLM call.
+- [ ] **Known gap, not fixed (by design choice)**: you're missing categories
+      that will likely be genuinely useful once real Chase/BofA data flows in
+      — especially **Utilities**, **Gas**, **Transportation**, **Salary**.
+      Worth adding these yourself via the Categories page before the fresh
+      resync, or they'll all fall to "Misc"/null.
+- [ ] **You still need to**: apply this update, redeploy, then do the fresh
+      resync and check real categorization coverage
+
 _(to be completed once implementation is done — summary of what changed,
 what was verified working, and any lessons for tasks/lessons.md)_

@@ -443,11 +443,22 @@ public class CategorizationService {
         return s.trim();
     }
 
+    // Rule target name (lowercase) -> real category name to also try if the
+    // exact rule target doesn't exist for this user (e.g. their category is
+    // named "Internal Transfer" instead of "Transfer").
+    private static final Map<String, String> CATEGORY_ALIASES = Map.of(
+            "transfer", "internal transfer"
+    );
+
     private Category findByKeyword(String normalizedMerchant, Map<String, Category> categoryLookup) {
         // 1. Keyword rules
         for (Map.Entry<String, String> rule : KEYWORD_RULES.entrySet()) {
             if (normalizedMerchant.contains(rule.getKey())) {
-                Category cat = categoryLookup.get(rule.getValue().toLowerCase());
+                String targetLower = rule.getValue().toLowerCase();
+                Category cat = categoryLookup.get(targetLower);
+                if (cat == null && CATEGORY_ALIASES.containsKey(targetLower)) {
+                    cat = categoryLookup.get(CATEGORY_ALIASES.get(targetLower));
+                }
                 if (cat != null) return cat;
             }
         }
