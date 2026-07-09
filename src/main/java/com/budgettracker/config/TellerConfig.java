@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 
@@ -70,7 +71,10 @@ public class TellerConfig {
         if (!StringUtils.hasText(resolvedPath) || !StringUtils.hasText(keystorePassword)) {
             log.warn("Teller mTLS not configured (keystore path or password missing). " +
                     "Using plain RestTemplate — Teller API calls will fail until credentials are set.");
-            return new RestTemplate();
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+            factory.setConnectTimeout(10_000);
+            factory.setReadTimeout(45_000);
+            return new RestTemplate(factory);
         }
 
         try {
@@ -94,8 +98,14 @@ public class TellerConfig {
                             .setSSLSocketFactory(sslSocketFactory)
                             .build();
 
+            var requestConfig = org.apache.hc.client5.http.config.RequestConfig.custom()
+                    .setConnectTimeout(org.apache.hc.core5.util.Timeout.ofSeconds(10))
+                    .setResponseTimeout(org.apache.hc.core5.util.Timeout.ofSeconds(45))
+                    .build();
+
             CloseableHttpClient httpClient = HttpClients.custom()
                     .setConnectionManager(connectionManager)
+                    .setDefaultRequestConfig(requestConfig)
                     .build();
 
             log.info("Teller mTLS RestTemplate initialised successfully.");

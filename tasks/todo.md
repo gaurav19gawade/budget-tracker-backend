@@ -98,6 +98,26 @@
 - [x] Same for frontend repo (kept the existing Vite boilerplate below the
       project-specific section rather than deleting it)
 
-## Review section (filled in after execution)
+### 8. Prod bug: sync hangs at "Categorizing" (found live, 2026-07-09)
+- [x] Root cause #1: `AnthropicCategorizationService`'s `RestTemplate` field
+      is autowired by type, and Spring resolves the ambiguity between the
+      two `RestTemplate` beans (`restTemplate` in
+      `BudgetTrackerBackendApplication`, `tellerRestTemplate` in
+      `TellerConfig`) by matching the field/parameter name — so it actually
+      gets the plain default bean, not the Teller one. Not itself a bug, but
+      worth knowing.
+- [x] Root cause #2 (the real bug): **neither** `RestTemplate` bean had any
+      connect/read timeout configured. Once `ANTHROPIC_API_KEY` was added on
+      Railway, the categorization step made a real HTTP call that could hang
+      indefinitely on any network hiccup — exactly matching the observed
+      "stuck spinning on Categorizing forever" symptom. Same latent bug
+      existed on the Teller HTTP client(s) too (relevant once Teller sandbox
+      creds are back).
+- [x] Fixed: added explicit connect (10s) / read (45s) timeouts to all three
+      RestTemplate construction paths (default bean, Teller mTLS path,
+      Teller plain-fallback path). A hung external API now fails fast with a
+      clear error instead of hanging the UI forever.
+- [ ] **You still need to**: apply this update, redeploy, retest the resync
+      flow with the Anthropic key in place
 _(to be completed once implementation is done — summary of what changed,
 what was verified working, and any lessons for tasks/lessons.md)_
