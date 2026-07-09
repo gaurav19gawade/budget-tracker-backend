@@ -1,0 +1,23 @@
+#!/bin/bash
+# Copy this file to run-local.sh (already gitignored), fill in real values,
+# chmod +x it, then run: ./run-local.sh
+set -euo pipefail
+
+export DATABASE_URL="jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require"
+export DB_USERNAME="postgres"
+export DB_PASSWORD=""
+
+export JWT_SECRET=""
+
+export TELLER_APPLICATION_ID=""
+export TELLER_KEYSTORE_PATH="/absolute/path/to/certificate.pem"
+export TELLER_KEYSTORE_PASSWORD=""
+export TELLER_CONNECT_ENV="sandbox"
+
+export ANTHROPIC_API_KEY=""
+
+export CORS_ALLOWED_ORIGINS="http://localhost:5173,http://localhost:3000"
+export SPRING_PROFILES_ACTIVE="local"
+export SCHEDULING_ENABLED="false"
+
+mvn spring-boot:run

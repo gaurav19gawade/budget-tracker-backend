@@ -37,3 +37,9 @@ build/
 mvnw
 mvnw.cmd
 test-api.sh
+
+### Local secrets ###
+run-local.sh
+.env
+.env.local
+*.pem
