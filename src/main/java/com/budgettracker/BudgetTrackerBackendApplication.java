@@ -28,8 +28,8 @@ public class BudgetTrackerBackendApplication {
 	@Bean
 	public RestTemplate restTemplate(RestTemplateBuilder builder) {
 		return builder
-				.connectTimeout(Duration.ofSeconds(10))
-				.readTimeout(Duration.ofSeconds(45))
+				.setConnectTimeout(Duration.ofSeconds(10))
+				.setReadTimeout(Duration.ofSeconds(45))
 				.build();
 	}
 }
